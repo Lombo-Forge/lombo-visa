@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -12,6 +16,7 @@ jobs:
     # The same hooks a contributor runs locally (.pre-commit-config.yaml): file hygiene, ruff lint and
     # format, strict mypy, and the leak check. One config, so CI and laptops always agree.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -21,6 +26,7 @@ jobs:
       - run: pre-commit run --all-files --show-diff-on-failure
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -30,6 +36,7 @@ jobs:
       - run: pytest -q --cov --cov-report=term-missing
   leak-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - run: sh scripts/leak-check.sh
