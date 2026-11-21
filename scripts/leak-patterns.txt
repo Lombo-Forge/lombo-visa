@@ -1,0 +1,9 @@
+lombotv
+lombooks
+datlombardo\.ca
+x-lombotv
+discord(app)?\.com/api/webhooks
+192\.168\.
+/srv/
+gaming pc
+netflix

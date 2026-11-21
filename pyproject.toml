@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lombo-visa"
+version = "0.1.0"
+description = "Ends new Jellyfin sign-ins from countries you did not list, with travel windows. Fails open."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+dependencies = []  # standard library only; add a dependency only when it earns its place
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.17", "mypy>=2", "pre-commit>=4"]
+
+[project.scripts]
+lombo-visa = "lombo_visa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["slow: takes a few seconds (the hostile-file fuzz run); still part of the default run"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # import order
+    "B",            # likely bugs (flake8-bugbear)
+    "BLE",          # blind except: say why in a noqa comment
+    "S",            # security (flake8-bandit)
+    "UP",           # modern Python syntax
+    "SIM", "C4", "PIE", "RET",  # simplifications
+    "PT",           # pytest style
+    "RUF",          # ruff's own checks
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "PT011"]  # asserts, dummy secrets and seeded random are normal in tests
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+warn_unreachable = true
+
+[tool.coverage.run]
+source = ["lombo_visa"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90  # measured 94% on 2026-11-21; raise it as coverage grows, never lower it to pass
+show_missing = true
+skip_covered = true
+exclude_also = ["if __name__ == .__main__.:"]

@@ -1,0 +1,19 @@
+# Drop-in service block. Put it in your own compose file, or run it on its own with:
+#   docker compose -f compose.example.yaml up -d
+# First: mkdir data && chown 999 data   (the container user must be able to write there)
+# Then:  docker compose -f compose.example.yaml exec lombo-visa lombo-visa geoip update
+services:
+  lombo-visa:
+    image: ghcr.io/lombo-forge/lombo-visa:latest   # or build: .
+    container_name: lombo-visa
+    restart: unless-stopped
+    env_file: .env
+    read_only: true
+    mem_limit: 128m
+    volumes:
+      - ./data:/data   # state file and the country database
+    # If Jellyfin is in another compose project, join its network:
+    # networks: [media]
+# networks:
+#   media:
+#     external: true

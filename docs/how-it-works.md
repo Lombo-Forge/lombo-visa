@@ -1,0 +1,78 @@
+# How it works
+
+## Contents
+
+- [One round](#one-round)
+- [Verdicts](#verdicts)
+- [What is remembered](#what-is-remembered)
+- [Travel windows](#travel-windows)
+- [What happens on a denial](#what-happens-on-a-denial)
+- [What it never does](#what-it-never-does)
+- [The country database](#the-country-database)
+
+## One round
+
+1. Ask Jellyfin for its sessions (`GET /Sessions`). If that fails, the round ends and nothing is done.
+2. First run ever: record every existing session as allowed and stop. Later runs go on.
+3. (`run` in dry run still records allowed sessions in the state file; only `plan` writes nothing.) For each session whose `user:device` pair is not in the remembered list, find the country of the address Jellyfin recorded and decide.
+4. Print one line per new session. Remember the allowed ones. Alert on the others (once). End the denied ones if blocking is on.
+5. Sign out devices whose travel window ended (blocking on). Save the state file.
+
+## Verdicts
+
+| Verdict | Meaning | Remembered | Can be ended |
+|---|---|---|---|
+| `known` | this user and device were allowed before | already | no |
+| `exempt` | the account is in `EXEMPT_USERS` | yes | no |
+| `allow-home` | own network, or a country in `HOME_COUNTRIES` | yes | no |
+| `allow-window` | foreign country, but the person has an open window for it | yes (with the window id) | no |
+| `unknown` | no country could be found for the address (a code such as `ZZ`, `EU` or `A1` counts as no country) | yes, marked `unknown`, so it is never judged later | no |
+| `deny` | foreign country, no window | no | yes, when `DRY_RUN=false` and `BLOCK_SESSIONS=true` |
+
+An `unknown` session is remembered so that a database installed (or updated) later cannot turn it into a `deny` weeks afterwards;
+only a genuinely new sign-in is judged. `unknown` happens when the database is missing or unreadable, the address is not in it, or Jellyfin gave an address that is not a
+single IP address (for example a list). The first line of the alert says so.
+
+## What is remembered
+
+The state file (`LOMBO_VISA_STATE_FILE`, JSON) holds: whether the first run happened, the allowed `user:device` pairs, the denied or unknown
+sessions already reported (kept for 7 days so the same one is not reported every minute), and the travel windows. Deleting it makes the
+next run record the then-current sessions as allowed again and forget all windows. A damaged file is not deleted: it is moved to
+`state.json.bad-<time>` next to it with a warning, and the run starts fresh. A file that cannot be read at all skips the round. Commands
+that change the file (`run`, `travel add`, `travel revoke`) take a lock first, so a `travel add` made during a round waits for it. It contains user ids, user names and device ids; no
+addresses, passwords or tokens.
+
+## Travel windows
+
+`lombo-visa travel add NAME DAYS [--country CC]` looks the account up in Jellyfin (administrator accounts are refused), and stores a window
+that starts now and lasts at most `MAX_WINDOW_DAYS`. A window with a country allows only that country; without one, any country.
+It follows the account id, not the name. A new sign-in judged `allow-window` is remembered with the window's id. When the window has ended
+or was revoked, and the person has no other open window, those devices are signed out (only with blocking on; otherwise `run` and `plan`
+print "would sign out"). Devices that signed in from home are never touched.
+
+## What happens on a denial
+
+1. A line is printed: `<user> on <device> (<client>) from <country>: deny`.
+2. With `DRY_RUN=false` one webhook message is sent (all of a round's messages together, at most ten lines).
+3. With `BLOCK_SESSIONS=true` as well, `DELETE /Devices?id=<device id>` is sent. A 404 counts as success. Any other failure is printed and
+   retried quietly each round while the session is still listed.
+4. Not ended, only reported: the device id is empty, the device id also belongs to an allowed device of **another** account (ending it would
+   sign that person out), or more than `MAX_BLOCKS_PER_ROUND` **different accounts** were denied in the same round (a message says so). Accounts, not sessions:
+   one account opening many sessions cannot switch the sign-outs off. A wave across many accounts can, and that is reported loudly.
+
+## What it never does
+
+- Delete or change users, passwords, policies, libraries or media.
+- End a session that was already allowed or that existed before the first run.
+- End anything for an `unknown` country, with no database, or for an account in `EXEMPT_USERS`. A session first seen as `unknown` stays allowed.
+- Sign out a device id that another account also uses (window expiry included): it is only reported.
+- Send a sign-in attempt, a password or a token anywhere. It sees sessions after the fact.
+- Sit in the path of traffic. If it stops, Jellyfin carries on exactly as before.
+- Download anything except the country database, from one https address, with size limits.
+
+## The country database
+
+`lombo-visa geoip update` downloads `dbip-country-lite-YYYY-MM.mmdb.gz` from DB-IP (this month's, else last month's), unzips it with a
+size limit (64 MB unpacked, five minutes in all), checks it opens, answers lookups and is a country database, then moves it into place with one rename. It does nothing if the
+file in place is under 20 days old (unless `--force`). Any failure keeps the old file. `doctor` warns after 75 days.
+`LOMBO_VISA_GEOIP_URL` can point to another https source of the same kind of file.
