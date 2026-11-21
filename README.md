@@ -13,6 +13,21 @@
 
 Watches a Jellyfin server for new sign-ins and, if one comes from a country you did not list, tells you and (when you turn that on) signs that device out again. People who are travelling get a "travel window" first. If anything is unclear, it lets the sign-in through.
 
+## Two modes: pick one, or use both
+
+| | **Session mode** (`lombo-visa run --loop`, the default) | **Gateway mode** (`lombo-visa gateway`, optional) |
+|---|---|---|
+| When it acts | **After** Jellyfin accepted the sign-in. It polls the session list. | **Before** the sign-in exists: a foreign sign-in is refused with a 403 and never reaches Jellyfin. |
+| A correct password used from abroad | Works for up to one interval (60 s by default), then the device is signed out. | Refused straight away. |
+| What you set up | Nothing but the container and an API key. | Your reverse proxy must send Jellyfin's **sign-in paths only** to the gateway (Caddy and nginx examples in [examples/](examples/)), and must tell it the real client address. |
+| If it stops | Jellyfin carries on as before. | Sign-ins sent through it fail until it is back (everything else is untouched). |
+| Needs the API key | Yes | Only to look up who a typed name is (and it falls back to the name without it) |
+
+Both use the same country database, home countries, travel windows and settings, and both fail open. The gateway
+refuses nothing until you set **both** `LOMBO_VISA_DRY_RUN=false` and `LOMBO_VISA_GATEWAY_MODE=enforce`; with dry run on it
+only logs what it would have refused. **Keep your reverse proxy's rate limits and Jellyfin's own lockout switched on in either
+mode:** neither stops password guessing. Security notes for the gateway and the audit log: [docs/security.md](docs/security.md).
+
 > **Status: not release-ready.** LomboVisa has **not been run against a real Jellyfin server** (only against a fake one in the tests) and has **not had an independent security review**. [docs/security-review.md](docs/security-review.md) is the author's own threat model and a checklist to tick before trusting it. Until then keep it in dry-run mode.
 
 ```text
@@ -23,10 +38,14 @@ bob on Living room TV (Jellyfin Android TV) from US: allow-home
 
 ## Contents
 
+- [Two modes](#two-modes-pick-one-or-use-both)
 - [What it does and does not do](#what-it-does-and-does-not-do)
 - [Install in a minute](#install-in-a-minute)
 - [Commands](#commands)
 - [Settings](#settings)
+- [Gateway mode](#gateway-mode)
+- [Audit log](#audit-log)
+- [What is not verified](#what-is-not-verified)
 - [Travel windows](#travel-windows)
 - [FAQ](#faq)
 - [Credits](#credits)
@@ -47,7 +66,7 @@ Three stages, so you can trust it step by step: **dry run** (default: prints wha
 
 **Important limits, stated plainly:**
 
-- It reacts **after** Jellyfin accepted the sign-in. The new session lives until the next round (60 seconds by default). It does not stop password guessing; it limits what a correct password used from abroad can do. Keep your reverse proxy's rate limits and Jellyfin's own lockout on.
+- Session mode (this section) reacts **after** Jellyfin accepted the sign-in. The new session lives until the next round (60 seconds by default). It does not stop password guessing; it limits what a correct password used from abroad can do. Keep your reverse proxy's rate limits and Jellyfin's own lockout on. [Gateway mode](#gateway-mode) closes that gap at the price of a proxy setup.
 - Sessions that already exist keep working anywhere. A device that was allowed once is never judged again.
 - It sees the address **Jellyfin** records. Behind a reverse proxy Jellyfin must be told to trust the proxy, or every address looks like your own network. `doctor` warns about that.
 - VPN users appear in the country of their VPN exit.
@@ -82,10 +101,41 @@ Setup details, including making Jellyfin see real client addresses behind a prox
 | `lombo-visa travel add NAME DAYS [--country CC]` | Let a person sign in from abroad, starting now. |
 | `lombo-visa travel list` / `revoke ID` | Show or end windows. |
 | `lombo-visa geoip update [--force]` | Download the country database. Monthly is enough. |
+| `lombo-visa gateway` | Optional second mode: a small server that refuses sign-ins from abroad before Jellyfin sees them. See [Gateway mode](#gateway-mode). |
+| `lombo-visa audit [--last N] [--user NAME]` | Shows the decision log (needs `LOMBO_VISA_AUDIT_FILE`). |
 
 ## Settings
 
 Everything is an environment variable with the `LOMBO_VISA_` prefix, listed with defaults in [.env.example](.env.example). A bad value, or a name that is not a setting (a typo such as `EXEMPT_USER`), stops the app at start-up and names the variable.
+
+The gateway settings are `LOMBO_VISA_GATEWAY_MODE` (`off`, `log` (default) or `enforce`), `LOMBO_VISA_GATEWAY_BIND` (default `127.0.0.1:8099`), `LOMBO_VISA_GATEWAY_UPSTREAM` (default: the Jellyfin address) and `LOMBO_VISA_TRUSTED_PROXIES`; the audit log is `LOMBO_VISA_AUDIT_FILE`.
+
+## Gateway mode
+
+`lombo-visa gateway` is a small HTTP server for **Jellyfin's sign-in paths only**: password sign-in (`/Users/AuthenticateByName`), Quick Connect sign-in (`/Users/AuthenticateWithQuickConnect`) and the older `/Users/{id}/Authenticate`, with or without the `/emby` or `/mediabrowser` prefix. Anything else gets a 404; it is not a general proxy.
+
+For each sign-in it works out the client's country (same database, same `LAN_SUBNETS` rule, same travel windows as session mode). Allowed: the request goes to Jellyfin as it came and Jellyfin's answer comes back untouched. Refused (`enforce`, `DRY_RUN=false`, foreign country, no window): a plain 403 with a short JSON message, and Jellyfin never sees the password. Every doubt lets the sign-in through: no database, unknown address, unreadable windows, mode `off` or `log`.
+
+1. Put the gateway beside Jellyfin (see [examples/compose.gateway.yaml](examples/compose.gateway.yaml)), reachable only by your reverse proxy.
+2. Set `LOMBO_VISA_TRUSTED_PROXIES` to the proxy's address or network. The client address is read from `X-Forwarded-For` **only** when the connection comes from there; from anyone else the header is ignored.
+3. Send the sign-in paths to the gateway and everything else to Jellyfin: [examples/Caddyfile](examples/Caddyfile) or [examples/nginx.conf](examples/nginx.conf).
+4. Jellyfin must trust the gateway like it trusts your proxy (Known proxies), so it still records real addresses.
+5. Run `lombo-visa doctor`, then watch the log in the default mode `log` (decides and records, always forwards). Only then set `LOMBO_VISA_DRY_RUN=false` and `LOMBO_VISA_GATEWAY_MODE=enforce`.
+
+Limits: 64 KiB request bodies, 64 headers, short timeouts, 64 connections at once, no redirects followed. Bodies, passwords, tokens and addresses are never logged.
+
+## Audit log
+
+Set `LOMBO_VISA_AUDIT_FILE=/data/audit.jsonl` and every decision of both modes adds one line: time, mode (`session` or `gateway`), decision, country, user and a keyed hash of the address (the address itself is never stored; the key is made beside the file, mode 0600). The file moves to `audit.jsonl.1` at 5 MiB. Read it with `lombo-visa audit --last 20 --user alice` when someone asks "why was I blocked?". Gateway decisions are `allow-home`, `allow-window`, `exempt`, `unknown`, `deny` (refused) and `would-deny` (only logged); session mode uses its own verdict names.
+
+## What is not verified
+
+Everything here was tested only against fakes on this machine. Nothing below has been checked against a real server or client:
+
+- LomboVisa has not been run against a real Jellyfin (any version), session mode or gateway mode.
+- Gateway mode has not been run behind a real Caddy or nginx; the example files are untested. What Jellyfin's real Quick Connect answer and `/Sessions/Logout` do is assumed from the API, not seen.
+- Which sign-in paths every Jellyfin client and version uses is not confirmed; the three above are the ones the author knows.
+- No independent security review, no load test, no check of the real DB-IP download. See [docs/security.md](docs/security.md) and [docs/security-review.md](docs/security-review.md).
 
 ## Travel windows
 
@@ -105,7 +155,9 @@ Windows are per Jellyfin account (a renamed account keeps its window), start now
 
 **What if the database is missing or old?** Every address becomes "unknown" and is let through. `doctor` warns.
 
-**Why not a gateway in front of Jellyfin?** A gateway can refuse a sign-in before Jellyfin sees the password, but then it is a single point of failure on the path of every login. This app stays beside Jellyfin so that a crash cannot lock anyone out. The price is the delay described above.
+**Why is the gateway optional?** A gateway can refuse a sign-in before Jellyfin sees the password, but then it is on the path of every sign-in and needs your proxy set up for it. So session mode, which stays beside Jellyfin so that a crash cannot lock anyone out, is the zero-setup default; the price is the delay described above. Use the gateway when that delay matters to you.
+
+**What about a "strict mode" that judges every request, not only sign-ins?** Not built. A visitor with an existing session keeps it anywhere.
 
 **Does it work with Quick Connect and SSO?** It judges the session, whatever way it was created.
 

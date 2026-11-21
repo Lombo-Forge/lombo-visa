@@ -37,15 +37,21 @@ network, the disk or the clock; the time and the country function are passed in.
 | `mmdb.Reader(bytes).get(ip)` | an address | the record or `None`; raises `MmdbError` on a bad file |
 | `geoip.update(path, url, now, force)` | where to put the file | one line; raises `GeoIpError`, old file untouched |
 | `state.load/save` | a path | the JSON state; a damaged file means "start fresh" |
+| `gateway.classify(target)` | a request target | `(kind, id)` for the sign-in paths, else `None` (the path is decoded once; ambiguous forms are `None`) |
+| `gateway.client_address(peer, forwarded, trusted)` | the connecting address, `X-Forwarded-For` values, trusted networks | `(address or None, header ignored)` |
+| `gateway.Gateway.process(...)` | one classified request | a `Reply` (Jellyfin's answer untouched, or a 403) |
+| `audit.record(file, mode, decision, country, user, ip, now)` | one decision | appends one JSON line; never raises |
 
 ## Decisions made while porting
 
-1. **Polling, not a gateway.** The private original put a gateway in front of Jellyfin's sign-in endpoints (the reverse proxy
+1. **Polling by default, a gateway as an option.** The private original put a gateway in front of Jellyfin's sign-in endpoints (the reverse proxy
    sent them to the gateway, which looked up the country, then forwarded to Jellyfin or refused with a 403). That needs
    reverse-proxy configuration for every setup and puts the app on the path of every login. A public tool cannot assume a
-   particular proxy, and a crash would have to be survived by proxy settings. LomboVisa instead reads `GET /Sessions`
+   particular proxy, and a crash would have to be survived by proxy settings. So the zero-setup default reads `GET /Sessions`
    and ends new sessions after the fact. Costs: a window of up to one round in which the new session is usable, and no
-   protection against password guessing. Benefit: if LomboVisa stops, Jellyfin is unaffected.
+   protection against password guessing. Benefit: if LomboVisa stops, Jellyfin is unaffected. People who want the refusal
+   before the sign-in can also run `lombo-visa gateway` (`gateway.py`), behind a proxy rule they set up; it reuses `core.decide`,
+   the country lookup and the state file's windows, and fails open the same way.
 2. **No admin panel, no self-service.** Travel windows are made with `lombo-visa travel add`. The original's
    friend-facing "I am travelling" form (it needed the PIN system of the private stack) and its "notify the owner" page were cut.
 3. **Windows live in the state file** (JSON) instead of a database.
@@ -66,7 +72,7 @@ network, the disk or the clock; the time and the country function are passed in.
 | Windows per account (id), optional country, admin accounts excluded | Kept |
 | Max window length, cooldown for self-service | Max length kept (`MAX_WINDOW_DAYS`); cooldown cut with self-service |
 | Devices signed in under a window are signed out when it ends | Kept |
-| Keyed hash of addresses in a database of events | Cut: no events table; the log prints the country, never the address |
+| Keyed hash of addresses in a database of events | Kept as an opt-in file: `AUDIT_FILE`, JSON lines with a keyed hash of the address (`audit.py`) |
 | Discord posts | Generic webhook, mentions switched off |
 | Update script (`curl`, shell) | `lombo-visa geoip update` in Python, with extra checks (https only, same-host redirects, size caps, structure check) |
 | GeoIP reading with the `maxminddb` package | A small reader of our own, see below |

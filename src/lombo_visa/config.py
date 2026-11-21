@@ -30,7 +30,14 @@ SETTINGS = (
     "GEOIP_DB",
     "GEOIP_URL",
     "STATE_FILE",
+    "GATEWAY_MODE",
+    "GATEWAY_BIND",
+    "GATEWAY_UPSTREAM",
+    "TRUSTED_PROXIES",
+    "AUDIT_FILE",
 )
+
+GATEWAY_MODES = ("off", "log", "enforce")
 
 
 class ConfigError(Exception):
@@ -53,6 +60,16 @@ class Config:
     geoip_db: str
     geoip_url: str | None
     state_file: str
+    gateway_mode: str
+    gateway_bind: tuple[str, int]
+    gateway_upstream: str
+    trusted_proxies: tuple[Network, ...]
+    audit_file: str
+
+    @property
+    def gateway_effective_mode(self) -> str:
+        """DRY_RUN=true makes the gateway behave as `log` whatever GATEWAY_MODE says: nothing is refused."""
+        return "log" if self.dry_run and self.gateway_mode == "enforce" else self.gateway_mode
 
 
 def _truthy(value: str, name: str) -> bool:
@@ -84,6 +101,20 @@ def _url(name: str, value: str, schemes: set[str], example: str) -> str:
     if p.scheme not in schemes or not p.netloc:
         raise ConfigError(f"{PREFIX}{name} must be a full URL such as {example} (got {value!r})")
     return value
+
+
+def _bind(value: str) -> tuple[str, int]:
+    """'127.0.0.1:8099' or '[::1]:8099' (an address, not a name)."""
+    host, sep, port = value.rpartition(":")
+    host = host.strip("[]")
+    try:
+        ipaddress.ip_address(host)
+        number = int(port)
+    except ValueError:
+        number = 0
+    if not sep or not 1 <= number <= 65535:
+        raise ConfigError(f"{PREFIX}GATEWAY_BIND must look like 127.0.0.1:8099 or [::1]:8099 (got {value!r})")
+    return host, number
 
 
 def _check_names(env: dict[str, str]) -> None:
@@ -135,6 +166,25 @@ def from_env(env: dict[str, str]) -> Config:
     if geoip_url:
         _url("GEOIP_URL", geoip_url, {"https"}, "https://example.com/country.mmdb.gz")
 
+    gateway_mode = get("GATEWAY_MODE", "log").lower()
+    if gateway_mode not in GATEWAY_MODES:
+        raise ConfigError(f"{PREFIX}GATEWAY_MODE must be one of {', '.join(GATEWAY_MODES)} (got {gateway_mode!r})")
+    upstream = get("GATEWAY_UPSTREAM").rstrip("/") or url
+    _url("GATEWAY_UPSTREAM", upstream, {"http", "https"}, "http://jellyfin:8096")
+    parsed = urlparse(upstream)
+    if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+        raise ConfigError(
+            f"{PREFIX}GATEWAY_UPSTREAM must be only a scheme, host and port, such as http://jellyfin:8096"
+        )
+    proxies: list[Network] = []
+    for part in _items(get("TRUSTED_PROXIES")):
+        try:
+            proxies.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            raise ConfigError(
+                f"{PREFIX}TRUSTED_PROXIES has {part!r}, which is not an address or network such as 172.18.0.0/16"
+            ) from None
+
     # Safe by default: nothing is sent or ended until DRY_RUN=false, and nothing is ended until BLOCK_SESSIONS=true.
     return Config(
         jellyfin_url=url,
@@ -151,4 +201,9 @@ def from_env(env: dict[str, str]) -> Config:
         geoip_db=get("GEOIP_DB", "/data/dbip-country-lite.mmdb"),
         geoip_url=geoip_url,
         state_file=get("STATE_FILE", "/data/state.json"),
+        gateway_mode=gateway_mode,
+        gateway_bind=_bind(get("GATEWAY_BIND", "127.0.0.1:8099")),
+        gateway_upstream=upstream,
+        trusted_proxies=tuple(proxies),
+        audit_file=get("AUDIT_FILE"),
     )

@@ -1,0 +1,25 @@
+# Caddy in front of Jellyfin, with LomboVisa's gateway in front of the sign-in paths ONLY.
+# Everything else goes straight to Jellyfin, so the gateway is never on the path of streaming or browsing.
+#
+# Not tested against a real Caddy by the author. Check it yourself (see "Check it" in docs/setup.md).
+jellyfin.example.com {
+	# Any path that mentions "authenticate", in any letter case, goes to the gateway. This is deliberately wider than
+	# the three real sign-in paths: the gateway answers 404 to everything that is not exactly a sign-in, so a path
+	# you did not think of cannot slip past the gateway to Jellyfin by being spelled oddly.
+	@signin path_regexp (?i)authenticate
+	handle @signin {
+		reverse_proxy lombo-visa-gateway:8099
+	}
+
+	handle {
+		reverse_proxy jellyfin:8096
+	}
+}
+
+# Keep your own rate limit on the sign-in paths (a Caddy plugin or another layer) and keep Jellyfin's lockout on:
+# the gateway decides by country only and does nothing about password guessing.
+#
+# Caddy sets X-Forwarded-For to the client's address by itself when it is the first proxy. Put Caddy's address in
+# LOMBO_VISA_TRUSTED_PROXIES (for a compose network, its subnet, e.g. 172.18.0.0/16). If another proxy or a CDN is
+# in front of Caddy, Caddy must be told to trust it (`servers { trusted_proxies static <its networks> }`), or the
+# gateway will see the CDN's address instead of the visitor's.
