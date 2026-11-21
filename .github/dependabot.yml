@@ -13,6 +13,10 @@ updates:
     directory: /
     schedule: { interval: quarterly }
     open-pull-requests-limit: 2
+    ignore:
+      # The apps are tested on Python 3.12; a base-image jump is a deliberate change, not a Dependabot one.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       all:
         patterns: ["*"]
