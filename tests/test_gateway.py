@@ -569,7 +569,7 @@ def test_gateway_settings_defaults_and_values(env):
     assert cfg.gateway_mode == "log"
     assert cfg.gateway_bind == ("127.0.0.1", 8099)
     assert cfg.gateway_upstream == cfg.jellyfin_url
-    assert cfg.trusted_proxies == ()
+    assert cfg.proxy_networks == ()
     assert cfg.audit_file == ""
     cfg = from_env(
         {
@@ -583,7 +583,7 @@ def test_gateway_settings_defaults_and_values(env):
     assert cfg.gateway_mode == "enforce"
     assert cfg.gateway_bind == ("::1", 9000)
     assert cfg.gateway_upstream == "https://jf.example.com:8920"
-    assert len(cfg.trusted_proxies) == 3
+    assert len(cfg.proxy_networks) == 3
     assert cfg.gateway_effective_mode == "log"  # DRY_RUN is still true
     live = from_env({**env, "LOMBO_VISA_DRY_RUN": "false", "LOMBO_VISA_GATEWAY_MODE": "enforce"})
     assert live.gateway_effective_mode == "enforce"

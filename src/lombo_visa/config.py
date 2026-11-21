@@ -63,7 +63,7 @@ class Config:
     gateway_mode: str
     gateway_bind: tuple[str, int]
     gateway_upstream: str
-    trusted_proxies: tuple[Network, ...]
+    proxy_networks: tuple[Network, ...]
     audit_file: str
 
     @property
@@ -204,6 +204,6 @@ def from_env(env: dict[str, str]) -> Config:
         gateway_mode=gateway_mode,
         gateway_bind=_bind(get("GATEWAY_BIND", "127.0.0.1:8099")),
         gateway_upstream=upstream,
-        trusted_proxies=tuple(proxies),
+        proxy_networks=tuple(proxies),
         audit_file=get("AUDIT_FILE"),
     )

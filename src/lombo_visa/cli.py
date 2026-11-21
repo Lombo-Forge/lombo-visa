@@ -173,15 +173,15 @@ def _doctor_gateway(cfg: Config) -> bool:
             f"[WARN] gateway: {host}:{port} is not a loopback address, so anything that can reach it can send sign-ins "
             "to it. Let only your reverse proxy reach this port (a private compose network, or a firewall)."
         )
-    if not cfg.trusted_proxies:
+    if not cfg.proxy_networks:
         print(
             "[WARN] gateway: LOMBO_VISA_TRUSTED_PROXIES is empty, so the client is always the address that connects "
             "and X-Forwarded-For is ignored. Behind a reverse proxy every client would look like the proxy "
             "(your own network, so nothing is refused). Add the proxy's address."
         )
-    for net in cfg.trusted_proxies:
-        if net.prefixlen < (8 if net.version == 4 else 32):
-            print(f"[WARN] gateway: trusted proxy {net} is very wide; anyone inside it can claim any client address.")
+    for network in cfg.proxy_networks:
+        if network.prefixlen < (8 if network.version == 4 else 32):
+            print(f"[WARN] gateway: trusted proxy {network} is very wide; anyone in it can claim any client address.")
     if cfg.gateway_mode == "enforce" and cfg.dry_run:
         print("[WARN] gateway: mode is enforce but DRY_RUN is true, so it only logs. Set DRY_RUN=false to refuse.")
     try:

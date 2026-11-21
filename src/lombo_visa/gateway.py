@@ -429,7 +429,7 @@ class _Handler(BaseHTTPRequestHandler):
             return _json_reply(400, "Bad Request", "The body is shorter than Content-Length.")
         gw = self.server.gateway
         forwarded = self.headers.get_all("X-Forwarded-For") or []
-        ip, ignored = client_address(str(self.client_address[0]), forwarded, gw.cfg.trusted_proxies)
+        ip, ignored = client_address(str(self.client_address[0]), forwarded, gw.cfg.proxy_networks)
         if ignored:
             gw.note_ignored_header()
         return gw.process(kind, path_id, self.command, self.path, pairs, body, ip)
