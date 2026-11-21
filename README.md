@@ -44,6 +44,7 @@ bob on Living room TV (Jellyfin Android TV) from US: allow-home
 - [Commands](#commands)
 - [Settings](#settings)
 - [Gateway mode](#gateway-mode)
+- [Self-service travel](#self-service-travel)
 - [Audit log](#audit-log)
 - [What is not verified](#what-is-not-verified)
 - [Travel windows](#travel-windows)
@@ -103,12 +104,13 @@ Setup details, including making Jellyfin see real client addresses behind a prox
 | `lombo-visa geoip update [--force]` | Download the country database. Monthly is enough. |
 | `lombo-visa gateway` | Optional second mode: a small server that refuses sign-ins from abroad before Jellyfin sees them. See [Gateway mode](#gateway-mode). |
 | `lombo-visa audit [--last N] [--user NAME]` | Shows the decision log (needs `LOMBO_VISA_AUDIT_FILE`). |
+| `lombo-visa api` | Optional: a token-guarded local API so a page service (such as Shelf) can let a signed-in person open their own travel window. Off unless `LOMBO_VISA_API_TOKEN` is set. See [Self-service travel](#self-service-travel). |
 
 ## Settings
 
 Everything is an environment variable with the `LOMBO_VISA_` prefix, listed with defaults in [.env.example](.env.example). A bad value, or a name that is not a setting (a typo such as `EXEMPT_USER`), stops the app at start-up and names the variable.
 
-The gateway settings are `LOMBO_VISA_GATEWAY_MODE` (`off`, `log` (default) or `enforce`), `LOMBO_VISA_GATEWAY_BIND` (default `127.0.0.1:8099`), `LOMBO_VISA_GATEWAY_UPSTREAM` (default: the Jellyfin address) and `LOMBO_VISA_TRUSTED_PROXIES`; the audit log is `LOMBO_VISA_AUDIT_FILE`.
+The gateway settings are `LOMBO_VISA_GATEWAY_MODE` (`off`, `log` (default) or `enforce`), `LOMBO_VISA_GATEWAY_BIND` (default `127.0.0.1:8099`), `LOMBO_VISA_GATEWAY_UPSTREAM` (default: the Jellyfin address) and `LOMBO_VISA_TRUSTED_PROXIES`; the audit log is `LOMBO_VISA_AUDIT_FILE`. The self-service travel API has `LOMBO_VISA_API_TOKEN` (empty = off), `LOMBO_VISA_API_BIND` (default `127.0.0.1:8097`), `LOMBO_VISA_SELF_MAX_DAYS` (default 14) and `LOMBO_VISA_SELF_COOLDOWN_DAYS` (default 30).
 
 ## Gateway mode
 
@@ -124,9 +126,20 @@ For each sign-in it works out the client's country (same database, same `LAN_SUB
 
 Limits: 64 KiB request bodies, 64 headers, short timeouts, 64 connections at once, no redirects followed. Bodies, passwords, tokens and addresses are never logged.
 
+## Self-service travel
+
+Optional, and **off by default**. Normally an admin runs `lombo-visa travel add`. With `lombo-visa api` a person can open their own window from a page, with limits. Visa has no page of its own: a page service calls it, for example the [Shelf](https://github.com/Lombo-Forge) plugin for Jellyfin (Shelf's side is documented in Shelf).
+
+1. Set `LOMBO_VISA_API_TOKEN` to a long random value (`openssl rand -hex 32`) and give the same value to the calling service. Run `lombo-visa api` beside Jellyfin; it listens on `127.0.0.1:8097` unless `LOMBO_VISA_API_BIND` says otherwise, and only that service should be able to reach it.
+2. The service sends `Authorization: Bearer <token>` and, **from the user it has verified, never from the browser**, `GET /v1/travel/{user_id}` (is a window open, when may a new one be made) or `POST /v1/travel` with `{"user_id": "...", "days": 7}`.
+3. Visa asks Jellyfin who that is and opens a window for any foreign country, starting now, only when: the person exists and is not an administrator, `days` is 1 to `LOMBO_VISA_SELF_MAX_DAYS`, they have no window open or upcoming, and `LOMBO_VISA_SELF_COOLDOWN_DAYS` days have passed since their last self-opened window **ended** (0 = no wait). Anything else is refused with a plain message the person can read.
+4. Like everything else here, `LOMBO_VISA_DRY_RUN=true` (the default) makes it answer without writing anything.
+
+Whoever holds the token can open a window for any non-administrator, so treat it like the Jellyfin key. The exact calls are in [docs/contracts.md](docs/contracts.md), the safety notes in [docs/security.md](docs/security.md), and `lombo-visa doctor` explains the state it is in.
+
 ## Audit log
 
-Set `LOMBO_VISA_AUDIT_FILE=/data/audit.jsonl` and every decision of both modes adds one line: time, mode (`session` or `gateway`), decision, country, user and a keyed hash of the address (the address itself is never stored; the key is made beside the file, mode 0600). The file moves to `audit.jsonl.1` at 5 MiB. Read it with `lombo-visa audit --last 20 --user alice` when someone asks "why was I blocked?". Gateway decisions are `allow-home`, `allow-window`, `exempt`, `unknown`, `deny` (refused) and `would-deny` (only logged); session mode uses its own verdict names.
+Set `LOMBO_VISA_AUDIT_FILE=/data/audit.jsonl` and every decision of both modes adds one line: time, mode (`session` or `gateway`; `api` for self-service windows), decision, country, user and a keyed hash of the address (the address itself is never stored; the key is made beside the file, mode 0600). The file moves to `audit.jsonl.1` at 5 MiB. Read it with `lombo-visa audit --last 20 --user alice` when someone asks "why was I blocked?". Gateway decisions are `allow-home`, `allow-window`, `exempt`, `unknown`, `deny` (refused) and `would-deny` (only logged); session mode uses its own verdict names.
 
 ## What is not verified
 
@@ -134,6 +147,7 @@ Everything here was tested only against fakes on this machine. Nothing below has
 
 - LomboVisa has not been run against a real Jellyfin (any version), session mode or gateway mode.
 - Gateway mode has not been run behind a real Caddy or nginx; the example files are untested. What Jellyfin's real Quick Connect answer and `/Sessions/Logout` do is assumed from the API, not seen.
+- The self-service travel API has been called only by the tests (a real socket on this machine, a fake Jellyfin). No real page service, such as the Shelf plugin, has called it, and Jellyfin's real answer for the user list is assumed from its API.
 - Which sign-in paths every Jellyfin client and version uses is not confirmed; the three above are the ones the author knows.
 - No independent security review, no load test, no check of the real DB-IP download. See [docs/security.md](docs/security.md) and [docs/security-review.md](docs/security-review.md).
 
@@ -145,7 +159,7 @@ lombo-visa travel list
 lombo-visa travel revoke 1                    # ends it; devices that signed in under it are signed out on the next round
 ```
 
-Windows are per Jellyfin account (a renamed account keeps its window), start now, last at most `MAX_WINDOW_DAYS`, and are never made for administrator accounts. When a window ends or is revoked, the devices that signed in abroad under it are signed out (with blocking on).
+Windows are per Jellyfin account (a renamed account keeps its window), start now, last at most `MAX_WINDOW_DAYS`, and are never made for administrator accounts. A person can also open their own through the [self-service API](#self-service-travel), when you turn it on. When a window ends or is revoked, the devices that signed in abroad under it are signed out (with blocking on).
 
 ## FAQ
 

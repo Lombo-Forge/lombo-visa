@@ -5,7 +5,7 @@
 - [One round](#one-round)
 - [Verdicts](#verdicts)
 - [What is remembered](#what-is-remembered)
-- [Travel windows](#travel-windows)
+- [Travel windows](#travel-windows) (and [self-service windows](#self-service-windows-optional))
 - [What happens on a denial](#what-happens-on-a-denial)
 - [Gateway mode (optional)](#gateway-mode-optional)
 - [What it never does](#what-it-never-does)
@@ -40,7 +40,7 @@ The state file (`LOMBO_VISA_STATE_FILE`, JSON) holds: whether the first run happ
 sessions already reported (kept for 7 days so the same one is not reported every minute), and the travel windows. Deleting it makes the
 next run record the then-current sessions as allowed again and forget all windows. A damaged file is not deleted: it is moved to
 `state.json.bad-<time>` next to it with a warning, and the run starts fresh. A file that cannot be read at all skips the round. Commands
-that change the file (`run`, `travel add`, `travel revoke`) take a lock first, so a `travel add` made during a round waits for it. It contains user ids, user names and device ids; no
+that change the file (`run`, `travel add`, `travel revoke`, and a self-service request) take a lock first, so a `travel add` made during a round waits for it. It contains user ids, user names and device ids; no
 addresses, passwords or tokens.
 
 ## Travel windows
@@ -50,6 +50,23 @@ that starts now and lasts at most `MAX_WINDOW_DAYS`. A window with a country all
 It follows the account id, not the name. A new sign-in judged `allow-window` is remembered with the window's id. When the window has ended
 or was revoked, and the person has no other open window, those devices are signed out (only with blocking on; otherwise `run` and `plan`
 print "would sign out"). Devices that signed in from home are never touched.
+
+### Self-service windows (optional)
+
+With `LOMBO_VISA_API_TOKEN` set, `lombo-visa api` lets a page service (for example Shelf) open a window **for the person who is
+signed in there**. It makes the same kind of window as `travel add` (starts now, any country), with three differences:
+
+- It is stored with `"self": true`, so the rules below can tell it from one an admin made.
+- It is at most `LOMBO_VISA_SELF_MAX_DAYS` long (default 14, never more than `MAX_WINDOW_DAYS`).
+- After a self-opened window **ends** (or is revoked, whichever comes first) the same person must wait
+  `LOMBO_VISA_SELF_COOLDOWN_DAYS` (default 30, 0 = no wait) before opening another. Windows an admin made do not start a
+  cool-down. Self-opened windows are kept in the state file for 400 days after they end (others for 30) so a long cool-down is not forgotten.
+
+A request is refused when the person is not known to Jellyfin, is an administrator, already has an open or upcoming window (of any
+kind), or is inside a cool-down. It changes the state file under the same lock as `run` and `travel add`, so it never overwrites a
+round's work. Everything else about windows (sign-outs when one ends, revoke with `travel revoke`) is unchanged. The exact calls are in
+[contracts.md](contracts.md); the safety notes are in [security.md](security.md). With `DRY_RUN=true` the API answers and applies
+every rule but writes nothing.
 
 ## What happens on a denial
 
