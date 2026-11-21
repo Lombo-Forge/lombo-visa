@@ -8,16 +8,22 @@ lombo-visa travel add NAME DAYS [--country CC]   allow a person to sign in from 
 lombo-visa travel list                   active and upcoming windows
 lombo-visa travel revoke ID              end a window; its devices are signed out on the next round
 lombo-visa geoip update [--force]        download the country database (monthly is enough)
+lombo-visa gateway                       optional: refuse sign-ins from abroad before Jellyfin sees them (a reverse
+                                         proxy sends only the sign-in paths here; see README)
+lombo-visa audit [--last N] [--user NAME]  show the decision log (needs LOMBO_VISA_AUDIT_FILE)
 """
 
 import argparse
+import ipaddress
 import os
 import sys
+import tempfile
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from . import __version__, core, geoip, notify, state
+from . import __version__, audit, core, gateway, geoip, notify, state
 from .config import Config, ConfigError, from_env
 from .jellyfin import Jellyfin, JellyfinError
 
@@ -145,7 +151,64 @@ def doctor(cfg: Config, now: float) -> int:
     print(f"[ ok ] mode: {_mode(cfg)}")
     if cfg.block_sessions and cfg.dry_run:
         print("[WARN] BLOCK_SESSIONS is true but DRY_RUN is still true: nothing will be ended")
+    ok = _doctor_gateway(cfg) and ok
     return 0 if ok else 1
+
+
+def _doctor_gateway(cfg: Config) -> bool:
+    """Checks for `lombo-visa gateway` (and the audit log). Warnings never fail doctor; an unusable audit file does."""
+    ok = True
+    host, port = cfg.gateway_bind
+    mode = cfg.gateway_effective_mode
+    if cfg.gateway_mode == "off":
+        print("[ ok ] gateway: mode off (the `gateway` command passes sign-ins through without a decision)")
+    elif mode != cfg.gateway_mode:
+        print(f"[ ok ] gateway: mode {cfg.gateway_mode}, but DRY_RUN=true makes it act as {mode}: nothing is refused")
+    else:
+        print(f"[ ok ] gateway: mode {mode} on {host}:{port}, upstream {cfg.gateway_upstream}")
+    if cfg.gateway_mode == "off":
+        return _doctor_audit(cfg)
+    if not ipaddress.ip_address(host).is_loopback:
+        print(
+            f"[WARN] gateway: {host}:{port} is not a loopback address, so anything that can reach it can send sign-ins "
+            "to it. Let only your reverse proxy reach this port (a private compose network, or a firewall)."
+        )
+    if not cfg.proxy_networks:
+        print(
+            "[WARN] gateway: LOMBO_VISA_TRUSTED_PROXIES is empty, so the client is always the address that connects "
+            "and X-Forwarded-For is ignored. Behind a reverse proxy every client would look like the proxy "
+            "(your own network, so nothing is refused). Add the proxy's address."
+        )
+    for network in cfg.proxy_networks:
+        if network.prefixlen < (8 if network.version == 4 else 32):
+            print(f"[WARN] gateway: trusted proxy {network} is very wide; anyone in it can claim any client address.")
+    if cfg.gateway_mode == "enforce" and cfg.dry_run:
+        print("[WARN] gateway: mode is enforce but DRY_RUN is true, so it only logs. Set DRY_RUN=false to refuse.")
+    try:
+        info = Jellyfin(cfg.gateway_upstream, cfg.jellyfin_api_key).public_info()
+        print(f"[ ok ] gateway upstream reachable: {core.clean_text(info.get('ServerName'))}")
+    except JellyfinError as e:
+        print(f"[WARN] gateway upstream: {e}. Sign-ins through the gateway would get a 502 until it answers.")
+    return _doctor_audit(cfg) and ok
+
+
+def _doctor_audit(cfg: Config) -> bool:
+    if not cfg.audit_file:
+        print("[ ok ] audit log: off (set LOMBO_VISA_AUDIT_FILE to keep one)")
+        return True
+    try:
+        key = audit.key_path(cfg.audit_file)
+        if key.exists() and len(key.read_bytes()) != audit.KEY_BYTES:
+            raise ValueError(f"{key} is not a key file; delete it to make a new one")
+        Path(cfg.audit_file).parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=Path(cfg.audit_file).parent, prefix=".audit-check-")
+        os.close(fd)
+        Path(tmp).unlink()
+    except (OSError, ValueError) as e:
+        print(f"[FAIL] audit log: {core.clean_text(e, 200)}")
+        return False
+    print(f"[ ok ] audit log: {cfg.audit_file} (addresses are stored only as keyed hashes)")
+    return True
 
 
 # ---------------------------------------------------------------- plan and run
@@ -203,6 +266,8 @@ def _round(cfg: Config, now: float) -> int:
         if i.verdict == core.KNOWN:
             continue
         if i.remember:
+            if i.verdict != core.UNKNOWN or i.first_note:
+                _audit(cfg, i, now)
             if len(st["devices"]) < MAX_DEVICES:
                 entry: dict[str, Any] = {
                     "user": core.clean_text(i.session.user_name),
@@ -219,6 +284,8 @@ def _round(cfg: Config, now: float) -> int:
             if i.revoke and live and cfg.block_sessions:  # an earlier attempt failed: try again quietly
                 _end(jf, i)
             continue
+        if not i.remember:
+            _audit(cfg, i, now)
         print(core.describe(i) + (" -> would end it" if i.revoke else ""))
         ended = bool(i.revoke and live and cfg.block_sessions and _end(jf, i))
         messages.append(core.alert_text(i, ended))
@@ -245,6 +312,13 @@ def _round(cfg: Config, now: float) -> int:
     elif messages:
         print(f"({len(messages)} alert(s) not sent: {'dry run' if cfg.dry_run else 'no webhook set'})")
     return 0
+
+
+def _audit(cfg: Config, i: core.Item, now: float) -> None:
+    """One audit line per new sign-in judged (a no-op unless LOMBO_VISA_AUDIT_FILE is set)."""
+    audit.record(
+        cfg.audit_file, "session", i.verdict, i.country, i.session.user_name, core.normalise_ip(i.session.ip), now
+    )
 
 
 def _end(jf: Jellyfin, i: core.Item) -> bool:
@@ -353,6 +427,23 @@ def geoip_update(cfg: Config, force: bool, now: float) -> int:
     return 0
 
 
+def audit_cmd(cfg: Config, last: int, user: str | None) -> int:
+    if not cfg.audit_file:
+        print("[FAIL] the audit log is off. Set LOMBO_VISA_AUDIT_FILE to a file in your data folder.", file=sys.stderr)
+        return 1
+    rows = audit.read(cfg.audit_file, last, user)
+    for r in rows:
+        stamp = _when(float(r["ts"]))  # type: ignore[arg-type]  # audit.read keeps only rows whose ts is a number
+        print(
+            f"{stamp}  {core.clean_text(r.get('mode'), 8):<8} {core.clean_text(r.get('decision'), 12):<12} "
+            f"{core.clean_text(r.get('country'), 8):<7} {core.clean_text(r.get('user')):<20} "
+            f"ip#{core.clean_text(r.get('ip_hash'), 16)}"
+        )
+    if not rows:
+        print("No matching entries.")
+    return 0
+
+
 def _describe_failure(e: Exception) -> str:
     if isinstance(e, JellyfinError | state.StateError):
         return str(e)
@@ -378,6 +469,10 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     tr.add_parser("revoke").add_argument("id", type=int)
     gi = sub.add_parser("geoip").add_subparsers(dest="action", required=True)
     gi.add_parser("update").add_argument("--force", action="store_true")
+    sub.add_parser("gateway")
+    au = sub.add_parser("audit")
+    au.add_argument("--last", type=int, default=20)
+    au.add_argument("--user")
     args = p.parse_args(argv)
 
     try:
@@ -395,6 +490,10 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
             return travel(cfg, args, time.time())
         if args.cmd == "geoip":
             return geoip_update(cfg, args.force, time.time())
+        if args.cmd == "audit":
+            return audit_cmd(cfg, args.last, args.user)
+        if args.cmd == "gateway":
+            return gateway.serve(cfg)
         while True:
             try:
                 run_once(cfg, time.time())

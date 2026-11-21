@@ -7,6 +7,7 @@
 - [What is remembered](#what-is-remembered)
 - [Travel windows](#travel-windows)
 - [What happens on a denial](#what-happens-on-a-denial)
+- [Gateway mode (optional)](#gateway-mode-optional)
 - [What it never does](#what-it-never-does)
 - [The country database](#the-country-database)
 
@@ -60,14 +61,34 @@ print "would sign out"). Devices that signed in from home are never touched.
    sign that person out), or more than `MAX_BLOCKS_PER_ROUND` **different accounts** were denied in the same round (a message says so). Accounts, not sessions:
    one account opening many sessions cannot switch the sign-outs off. A wave across many accounts can, and that is reported loudly.
 
+## Gateway mode (optional)
+
+`lombo-visa gateway` decides **before** Jellyfin sees a sign-in. Your reverse proxy sends only the sign-in paths to it.
+
+1. The path is classified: password sign-in, Quick Connect sign-in or the older `/Users/{id}/Authenticate`. Anything else, and any
+   method but POST, gets a 404. The path is decoded once; double encoding and other ambiguous spellings are "not a sign-in".
+2. The client address is the connecting address, or, if that is in `TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` hop that is
+   not itself trusted. The country comes from the same database as session mode; private ranges and `LAN_SUBNETS` are `LAN`.
+3. For a password sign-in the typed user name is read from the body (the legacy path carries the account id). An account in
+   `EXEMPT_USERS` is allowed. For a foreign country the travel windows decide, through `core.decide`, exactly as in session mode.
+4. Allowed (or mode `off`/`log`, or `DRY_RUN=true`): the request is forwarded as it came and Jellyfin's answer returned untouched.
+   Refused (`enforce` and `DRY_RUN=false` and verdict `deny`): a 403 with a short JSON message.
+5. Quick Connect does not name anyone in its request. From abroad it is forwarded; if Jellyfin's answer names a person without a
+   window (and the gateway is enforcing), the new session is ended with `POST /Sessions/Logout` and the 403 is returned instead.
+6. One line goes to the audit log if `AUDIT_FILE` is set. Every doubt along the way means "allow".
+
+Both modes can run side by side; they share the country database, the state file's windows and the settings.
+
 ## What it never does
 
 - Delete or change users, passwords, policies, libraries or media.
 - End a session that was already allowed or that existed before the first run.
 - End anything for an `unknown` country, with no database, or for an account in `EXEMPT_USERS`. A session first seen as `unknown` stays allowed.
 - Sign out a device id that another account also uses (window expiry included): it is only reported.
-- Send a sign-in attempt, a password or a token anywhere. It sees sessions after the fact.
-- Sit in the path of traffic. If it stops, Jellyfin carries on exactly as before.
+- Session mode: send a sign-in attempt, a password or a token anywhere. It sees sessions after the fact. (The gateway passes
+  them on, to the configured upstream only, and never logs or stores them.)
+- Session mode: sit in the path of traffic. If it stops, Jellyfin carries on exactly as before. The gateway is on the path of
+  the sign-in paths you send it; everything else never touches it.
 - Download anything except the country database, from one https address, with size limits.
 
 ## The country database

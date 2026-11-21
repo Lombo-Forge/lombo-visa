@@ -6,6 +6,8 @@
 - [Steps](#steps)
 - [Real addresses](#real-addresses)
 - [Going live in stages](#going-live-in-stages)
+- [Gateway mode](#gateway-mode)
+- [Audit log](#audit-log)
 - [Keeping the database fresh](#keeping-the-database-fresh)
 - [Webhooks](#webhooks)
 - [Running without Docker](#running-without-docker)
@@ -52,6 +54,35 @@ Make yourself a way back in before stage 3: a travel window for your own viewing
 nothing else depends on it.
 
 Keep administrator accounts to the local network or a VPN; they cannot get windows.
+
+## Gateway mode
+
+Optional. Session mode (everything above) reacts after Jellyfin accepted a sign-in; gateway mode refuses a sign-in from abroad before Jellyfin
+sees it, but only for the sign-in paths your reverse proxy sends to it. Read [security.md](security.md) first.
+
+1. Run it beside Jellyfin on a private network: [../examples/compose.gateway.yaml](../examples/compose.gateway.yaml). Do not publish its port.
+2. Set `LOMBO_VISA_TRUSTED_PROXIES` to your proxy's address or network, and `LOMBO_VISA_GATEWAY_BIND=0.0.0.0:8099` inside the container network
+   (the default `127.0.0.1:8099` is for running the gateway on the same host as the proxy, without Docker).
+3. Make the proxy send every path that mentions "authenticate" to the gateway and everything else to Jellyfin
+   ([../examples/Caddyfile](../examples/Caddyfile), [../examples/nginx.conf](../examples/nginx.conf)), and set `X-Forwarded-For` to the visitor's address
+   (replace it, never append to what the visitor sent).
+4. Add the gateway's address to Jellyfin's Known proxies, as for your proxy, so the sessions it records show real addresses.
+5. `lombo-visa doctor` shows the mode, warns about a bind that is not loopback, an empty or very wide trusted-proxy list, and an
+   upstream that does not answer.
+6. Stages: `GATEWAY_MODE=log` (the default) decides and records and always forwards. Read the log (or the audit log) for a week. Then
+   `LOMBO_VISA_DRY_RUN=false` **and** `LOMBO_VISA_GATEWAY_MODE=enforce`. With dry run on, `enforce` only logs, and the gateway says so at start.
+7. Keep your proxy's rate limit on the sign-in paths and Jellyfin's lockout on. A way back in is the same as for session mode: a travel window for
+   your own account, `EXEMPT_USERS`, or `GATEWAY_MODE=log`/`off` and a restart of the gateway.
+
+**Check it (needs a real server; not done by the author).** From a phone on mobile data, sign in: it should work and the log should show your
+country. Then from a VPN exit abroad with `enforce`: the app should show a refusal and the audit log a `deny`. `curl -i -X POST
+https://jellyfin.example.com/Users/AuthenticateByName` should reach the gateway (a 400 or 401 from Jellyfin or a 403 from the gateway), and
+`curl -i https://jellyfin.example.com/Users/Authenticate%252542yName` should reach Jellyfin directly or the gateway's 404, never a sign-in.
+
+## Audit log
+
+Set `LOMBO_VISA_AUDIT_FILE=/data/audit.jsonl` to keep one line per decision (session and gateway mode). `lombo-visa audit --last 20 --user alice` prints
+them. The addresses are stored only as keyed hashes; the key (`audit.key`) is made beside the file, mode 0600.
 
 ## Keeping the database fresh
 

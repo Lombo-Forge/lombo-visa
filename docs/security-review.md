@@ -27,8 +27,9 @@ accounts from a determined attacker, or anything on the media or file side of Je
 
 **Shape that drives everything below.** LomboVisa sits beside Jellyfin and polls `GET /Sessions`. It never sees the password and
 never sees the request. A new session therefore exists for up to one round (default 60 s) before it can be ended. This is a deliberate
-trade for failing safe: if LomboVisa is down or wrong, Jellyfin still works for everyone. A gateway in front of the sign-in endpoints
-(what the private original used) closes the gap but becomes a single point of failure and needs proxy-specific setup.
+trade for failing safe: if LomboVisa is down or wrong, Jellyfin still works for everyone. The optional gateway mode (`lombo-visa gateway`)
+closes the gap by refusing before the sign-in exists, but becomes a single point of failure for the sign-in paths and needs
+proxy-specific setup. **This file covers the session mode; the gateway and the audit log are in [security.md](security.md).**
 
 ## Where the data comes from, and who is trusted
 
@@ -195,7 +196,8 @@ generated files; nothing here has been seen against a real Jellyfin.
   calls `GET /System/Info/Public`, `GET /System/Info`, `GET /Sessions`, `GET /Users` and `DELETE /Devices`. A compromise of the app (or of its `.env`) is a compromise of
   Jellyfin administration. Keep the file readable only by you; use a key only for this app so it can be revoked.
 - The webhook URL (a secret in itself for most chat services).
-- No passwords or tokens of users are ever read, stored or logged. The state file holds user ids and names, device ids and window dates, not addresses.
+- Session mode never sees passwords or tokens. The gateway sees them in passing (it forwards them to the configured upstream only) and never logs or stores them: [security.md](security.md).
+- No passwords or tokens of users are ever read, stored or logged by session mode. The state file holds user ids and names, device ids and window dates, not addresses.
 - The container runs as an unprivileged user (uid 999), with a read-only root file system and 128 MB of memory in the example compose file.
   The reader holds the whole database (a few MB, at most 64 MB) in memory and answers each lookup with a fixed value and text budget.
 - The Jellyfin client never follows a redirect, so the API key is not sent to any other address.
@@ -234,4 +236,11 @@ The owner ticks these, in order. Nothing here has been done yet: every box needs
 **Review**
 - [ ] Someone other than the author reads `core.py`, `mmdb.py`, `geoip.py`, `jellyfin.py`, `state.py` and this file, and tries to break the reader with hostile files. (The 2026-11-21 audit was one pass of this by an unattended tool; its two reader findings are fixed and its fuzz run is now `tests/test_mmdb_fuzz.py`. Re-run the audit after these changes, and have a person read the diff.)
 - [ ] CodeQL and the leak check pass on the published repository.
+
+**Gateway mode and the audit log (see [security.md](security.md))**
+- [ ] Behind a throwaway Jellyfin and a real Caddy and a real nginx: the example rules send the sign-in paths to the gateway and nothing else; a sign-in from the web client, a phone app and Quick Connect works; a refused one shows the refusal in the client.
+- [ ] Confirm what Jellyfin's real Quick Connect answer holds (`User.Name`, `User.Id`, `AccessToken`) and that `POST /Sessions/Logout` with that token ends the session.
+- [ ] Confirm the three sign-in paths are all that Jellyfin's clients use (list them from a few clients and versions).
+- [ ] Someone other than the author reads `gateway.py` and `audit.py`, and tries odd paths, headers and slow clients against it.
+- [ ] Confirm `X-Forwarded-For` as your proxy sets it ends with the visitor's address, and that Known proxies in Jellyfin lists the gateway.
 - [ ] README banner about "not run against a real Jellyfin / no independent review" is removed or reworded only after the boxes above are ticked, and this file is updated with the results.

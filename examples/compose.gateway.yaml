@@ -1,0 +1,39 @@
+# Both modes side by side. Not a complete stack: it shows only the LomboVisa parts.
+#   session mode  (`run --loop`)  watches Jellyfin's session list and reacts after a sign-in happened.
+#   gateway mode  (`gateway`)     refuses a sign-in from abroad before Jellyfin sees it, if your reverse proxy sends the
+#                                 sign-in paths to it (see Caddyfile or nginx.conf in this folder).
+# Both read the same .env and the same data folder (travel windows, country database, audit log).
+# First: mkdir data && chown 999 data
+services:
+  lombo-visa:
+    image: ghcr.io/lombo-forge/lombo-visa:latest
+    container_name: lombo-visa
+    restart: unless-stopped
+    env_file: .env
+    read_only: true
+    mem_limit: 128m
+    volumes:
+      - ./data:/data
+    networks: [media]
+
+  lombo-visa-gateway:
+    image: ghcr.io/lombo-forge/lombo-visa:latest
+    container_name: lombo-visa-gateway
+    command: ["gateway"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Listen on the private network only. Do NOT publish this port: only the reverse proxy should reach it.
+      LOMBO_VISA_GATEWAY_BIND: "0.0.0.0:8099"
+      # The reverse proxy's network, so its X-Forwarded-For is believed (and nobody else's).
+      LOMBO_VISA_TRUSTED_PROXIES: "172.18.0.0/16"
+    read_only: true
+    mem_limit: 128m
+    volumes:
+      - ./data:/data
+    networks: [media]
+    # No `ports:`. `lombo-visa doctor` warns about a bind that is not loopback; inside a private network that is expected.
+
+networks:
+  media:
+    external: true   # the network your reverse proxy and Jellyfin are on

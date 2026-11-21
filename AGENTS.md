@@ -29,7 +29,9 @@ It has not been run against a real Jellyfin and has not had an independent revie
 | `src/lombo_visa/state.py` | The JSON state file (allowed devices, notes, travel windows). |
 | `src/lombo_visa/config.py` | Settings from `LOMBO_VISA_*` environment variables. |
 | `src/lombo_visa/notify.py` | Webhook alerts (mentions off). |
-| `src/lombo_visa/cli.py` | `doctor`, `plan`, `run`, `travel`, `geoip`. The only place that prints, reads the clock or ends a session. |
+| `src/lombo_visa/gateway.py` | Optional second mode: a stdlib HTTP server for the sign-in paths only. Classifies the path (decode once, refuse ambiguous forms), finds the client address (`X-Forwarded-For` only from `TRUSTED_PROXIES`), decides with `core.decide`, forwards byte for byte or answers 403. Never a general proxy; never logs bodies, tokens or addresses. Notes in `docs/security.md`. |
+| `src/lombo_visa/audit.py` | Opt-in JSON-lines decision log (`AUDIT_FILE`); addresses only as a keyed hash; rotation to one `.1` file; never raises. |
+| `src/lombo_visa/cli.py` | `doctor`, `plan`, `run`, `travel`, `geoip`, `gateway`, `audit`. The only place that prints, reads the clock or ends a session (the gateway prints its own log lines and may end a refused Quick Connect session). |
 | `tests/` | pytest. Fake Jellyfin and webhook in `conftest.py`; `mmdb_builder.py` builds a tiny database in memory; `test_hardening.py` and `test_mmdb_fuzz.py` hold the audit regressions (every fix has a test that fails without it). |
 | `scripts/leak-check.sh` | Fails when private or personal strings appear. CI runs it. |
 | `docs/` | One topic per file, each with a `## Contents` list. |
@@ -42,7 +44,8 @@ It has not been run against a real Jellyfin and has not had an independent revie
 - **Treat client text as hostile.** User names, device names and clients go through `core.clean_text` before any log line or alert.
 - **No real database in the repo, ever.** DB-IP Lite is CC BY 4.0: it is downloaded at run time and credited in `NOTICE.md` and the README. Tests use `tests/mmdb_builder.py`. Test addresses must not be documentation ranges (`203.0.113.x` and the like count as private to Python).
 - **A new setting** goes in `config.py` (validated, message names the variable), `SETTINGS`, `.env.example` (a test keeps them in sync).
-- **A change to what a denial does** also changes `docs/how-it-works.md` and `docs/security-review.md`.
+- **A change to what a denial does** also changes `docs/how-it-works.md` and `docs/security-review.md`. A change to the gateway or the audit log also changes `docs/security.md` and the README "What is not verified" list.
+- **The gateway forwards only exact sign-in paths** and answers 404 to everything else. Never widen `gateway.classify` to a prefix match, never log a body, a token, an `Authorization` header or an address, and never send a request anywhere but the configured upstream. Dry run (`DRY_RUN=true`) always makes it act as `log`.
 - **Never put private details in the repo:** real hostnames, IPs, webhook URLs, keys, local paths. Use `jellyfin.example.com`, `/mnt/media`, `changeme`. `scripts/leak-check.sh` enforces it; patterns live in `scripts/leak-patterns.txt`.
 - Plain language in docs and messages. Never imply the Jellyfin project made this.
 - The Lombo look (every icon has the Lombo L) is in `docs/branding.md`.
