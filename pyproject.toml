@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lombo-visa"
-version = "0.1.1"
+version = "0.2.0"
 description = "Ends new Jellyfin sign-ins from countries you did not list, with travel windows. Fails open."
 readme = "README.md"
 requires-python = ">=3.12"
