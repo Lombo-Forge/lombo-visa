@@ -15,7 +15,7 @@ jobs:
       # The template repo itself only makes a GitHub release. Apps made from it are not templates,
       # so for them these three steps publish the container image.
       - if: ${{ !github.event.repository.is_template }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -26,7 +26,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
       - if: ${{ !github.event.repository.is_template }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
