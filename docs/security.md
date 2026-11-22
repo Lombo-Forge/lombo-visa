@@ -1,6 +1,6 @@
-# Security notes: the gateway and the audit log
+# Security notes: the gateway, the travel API and the audit log
 
-Short notes on the two parts that listen on a port or write a file. The wider threat model of the session mode is in
+Short notes on the parts that listen on a port or write a file. The wider threat model of the session mode is in
 [security-review.md](security-review.md). **None of this has been run against a real Jellyfin or a real reverse proxy,
 and none of it has had an independent review.** Every statement below is about what the code does, checked only
 against a fake server in the tests.
@@ -8,6 +8,7 @@ against a fake server in the tests.
 ## Contents
 
 - [Gateway](#gateway)
+- [Self-service travel API](#self-service-travel-api)
 - [Audit log](#audit-log)
 - [What is not verified](#what-is-not-verified)
 
@@ -69,9 +70,50 @@ audit log (below) holds a keyed hash of the address, never the address.
   Jellyfin's real answers look like, are unconfirmed.
 - Whoever can write the state file or the data folder can grant windows or change the database.
 
+## Self-service travel API
+
+`lombo-visa api` is a small HTTP server (standard library only) that lets a page service open a travel window for the person
+who is signed in there. It is off unless `LOMBO_VISA_API_TOKEN` is set, and it listens on `127.0.0.1:8097` by default. The calls are in
+[contracts.md](contracts.md). It writes the state file, so it can grant people the right to sign in from abroad: protect the token like the Jellyfin key.
+
+**What it trusts**
+
+- Whoever holds the token, to name the right person. The page service must take the user id from the person it has verified,
+  never from the browser. Visa cannot check that: anyone with the token can open a window for any non-administrator.
+- Jellyfin's answer to `GET /Users`, to learn whether the id exists and whether it is an administrator (asked on every `POST`).
+- Nothing in a request but its two fields; everything else about the window (start, country, longest length) comes from Visa's settings.
+
+**What it refuses**
+
+- A request without the exact token: `401` with a fixed message. The token is compared in constant time. After 10 failures in a minute
+  from one address every request from it gets `429`, a right token included, until the minute is up (at most 1024 addresses are tracked).
+- A token shorter than 24 characters, or with spaces or non-ASCII characters: Visa does not start. An empty token means no API.
+- Any path or method but the two routes, a body that is not strict JSON with exactly the two keys (duplicate keys, `NaN`,
+  non-integer `days` and a malformed user id included), a body over 4096 bytes, a missing `Content-Length`, a type other than JSON,
+  a client that stalls for more than 10 seconds. No CORS headers are sent, so a browser page cannot call it from another origin.
+- Administrator accounts, unknown accounts, a second window while one is open or upcoming, a new window inside the cool-down, and
+  any `days` outside 1 to `SELF_MAX_DAYS`. The window is always "any foreign country" and always starts now.
+- Writing anything while `DRY_RUN=true`, or when Jellyfin or the state file cannot be used (`502`, nothing changed). A damaged state
+  file is never moved aside by this server (unlike `run`); it is reported and left alone.
+
+**What it never logs or stores.** The token, the `Authorization` header, request bodies, user ids, user names and addresses are not
+in its log lines, which hold only the method, the shape of the route (`/v1/travel/{id}`) and the status. Python's own request logging is
+switched off. Error answers carry no paths, no Jellyfin text and no exception text. The state file gets the window (user id, user name,
+times, `"self": true`), like `travel add`; the audit log, if on, gets the user's name and no address.
+
+**Not defended**
+
+- A leaked token: it can open windows for everyone who is not an administrator until you change it (then restart). Windows can be
+  revoked with `lombo-visa travel revoke`; `lombo-visa audit` shows who got one and when.
+- A non-loopback bind that anyone but the calling service can reach. `doctor` warns. There is no TLS: keep it on loopback or a private network.
+- Several threads race only on the state file, which is locked like the other modes; a stuck `run` holds the lock, and a request then waits for it
+  (up to the client's own timeout) rather than failing.
+- The cool-down can be skipped by an admin (`travel add` ignores it) and a person who has two Jellyfin accounts has two windows.
+
 ## Audit log
 
-`LOMBO_VISA_AUDIT_FILE` (empty = off). One JSON line per decision from the session mode and the gateway:
+`LOMBO_VISA_AUDIT_FILE` (empty = off). One JSON line per decision from the session mode, the gateway and the travel API (`mode` is
+`session`, `gateway` or `api`; the API's decisions are `self-window` and `would-self-window`, with an empty `ip_hash`, since the person's address is not known to it):
 `ts`, `mode`, `decision`, `country`, `user`, `ip_hash`.
 
 - **Stores:** the time (whole seconds), which mode, the verdict, the country code, the user name (cleaned, cut to 40
@@ -92,4 +134,6 @@ audit log (below) holds a keyed hash of the address, never the address.
   answer and `/Sessions/Logout` do in practice, and that the same Jellyfin treats headers and paths the way the
   gateway assumes.
 - No real reverse proxy: the Caddy and nginx examples have not been run.
+- The travel API has been called only by the tests (real socket, fake Jellyfin). No real page service (such as the Shelf plugin) has
+  called it, and what a real Jellyfin returns for `GET /Users` is assumed from its API.
 - No load test and no independent review.

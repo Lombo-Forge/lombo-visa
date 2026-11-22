@@ -30,8 +30,9 @@ It has not been run against a real Jellyfin and has not had an independent revie
 | `src/lombo_visa/config.py` | Settings from `LOMBO_VISA_*` environment variables. |
 | `src/lombo_visa/notify.py` | Webhook alerts (mentions off). |
 | `src/lombo_visa/gateway.py` | Optional second mode: a stdlib HTTP server for the sign-in paths only. Classifies the path (decode once, refuse ambiguous forms), finds the client address (`X-Forwarded-For` only from `TRUSTED_PROXIES`), decides with `core.decide`, forwards byte for byte or answers 403. Never a general proxy; never logs bodies, tokens or addresses. Notes in `docs/security.md`. |
+| `src/lombo_visa/api.py` | Optional third mode: the token-guarded self-service travel API (`lombo-visa api`): routes, token check, failure limit, body limits, and the self-window rules (admin refused, one open window, cool-down, max days). Writes windows under `state.locked`; never logs the token, ids or bodies. The calls are a contract in `docs/contracts.md`; notes in `docs/security.md`. |
 | `src/lombo_visa/audit.py` | Opt-in JSON-lines decision log (`AUDIT_FILE`); addresses only as a keyed hash; rotation to one `.1` file; never raises. |
-| `src/lombo_visa/cli.py` | `doctor`, `plan`, `run`, `travel`, `geoip`, `gateway`, `audit`. The only place that prints, reads the clock or ends a session (the gateway prints its own log lines and may end a refused Quick Connect session). |
+| `src/lombo_visa/cli.py` | `doctor`, `plan`, `run`, `travel`, `geoip`, `gateway`, `api`, `audit`. The only place that prints, reads the clock or ends a session (the gateway prints its own log lines and may end a refused Quick Connect session). |
 | `tests/` | pytest. Fake Jellyfin and webhook in `conftest.py`; `mmdb_builder.py` builds a tiny database in memory; `test_hardening.py` and `test_mmdb_fuzz.py` hold the audit regressions (every fix has a test that fails without it). |
 | `scripts/leak-check.sh` | Fails when private or personal strings appear. CI runs it. |
 | `docs/` | One topic per file, each with a `## Contents` list. |
@@ -46,6 +47,7 @@ It has not been run against a real Jellyfin and has not had an independent revie
 - **A new setting** goes in `config.py` (validated, message names the variable), `SETTINGS`, `.env.example` (a test keeps them in sync).
 - **A change to what a denial does** also changes `docs/how-it-works.md` and `docs/security-review.md`. A change to the gateway or the audit log also changes `docs/security.md` and the README "What is not verified" list.
 - **The gateway forwards only exact sign-in paths** and answers 404 to everything else. Never widen `gateway.classify` to a prefix match, never log a body, a token, an `Authorization` header or an address, and never send a request anywhere but the configured upstream. Dry run (`DRY_RUN=true`) always makes it act as `log`.
+- **The travel API is a contract and writes the state file.** Routes, status codes and rules are in `docs/contracts.md`; change them there in the same pull request. It is off without `LOMBO_VISA_API_TOKEN`, sends no CORS headers, never logs a token, user id, body or address, and `DRY_RUN=true` makes it write nothing. Self-opened windows carry `"self": true` (kept through a revoke and for 400 days by `state.prune`).
 - **Never put private details in the repo:** real hostnames, IPs, webhook URLs, keys, local paths. Use `jellyfin.example.com`, `/mnt/media`, `changeme`. `scripts/leak-check.sh` enforces it; patterns live in `scripts/leak-patterns.txt`.
 - Plain language in docs and messages. Never imply the Jellyfin project made this.
 - The Lombo look (every icon has the Lombo L) is in `docs/branding.md`.

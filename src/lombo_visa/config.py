@@ -35,7 +35,13 @@ SETTINGS = (
     "GATEWAY_UPSTREAM",
     "TRUSTED_PROXIES",
     "AUDIT_FILE",
+    "API_TOKEN",
+    "API_BIND",
+    "SELF_MAX_DAYS",
+    "SELF_COOLDOWN_DAYS",
 )
+
+TOKEN_MIN = 24
 
 GATEWAY_MODES = ("off", "log", "enforce")
 
@@ -65,6 +71,10 @@ class Config:
     gateway_upstream: str
     proxy_networks: tuple[Network, ...]
     audit_file: str
+    api_token: str = ""  # empty = the self-service travel API is off
+    api_bind: tuple[str, int] = ("127.0.0.1", 8097)
+    self_max_days: int = 14
+    self_cooldown_days: int = 30
 
     @property
     def gateway_effective_mode(self) -> str:
@@ -103,7 +113,7 @@ def _url(name: str, value: str, schemes: set[str], example: str) -> str:
     return value
 
 
-def _bind(value: str) -> tuple[str, int]:
+def _bind(value: str, name: str = "GATEWAY_BIND") -> tuple[str, int]:
     """'127.0.0.1:8099' or '[::1]:8099' (an address, not a name)."""
     host, sep, port = value.rpartition(":")
     host = host.strip("[]")
@@ -113,8 +123,17 @@ def _bind(value: str) -> tuple[str, int]:
     except ValueError:
         number = 0
     if not sep or not 1 <= number <= 65535:
-        raise ConfigError(f"{PREFIX}GATEWAY_BIND must look like 127.0.0.1:8099 or [::1]:8099 (got {value!r})")
+        raise ConfigError(f"{PREFIX}{name} must look like 127.0.0.1:8099 or [::1]:8099 (got {value!r})")
     return host, number
+
+
+def token_problem(token: str) -> str | None:
+    """Why the API cannot use this token, or None when it is fine (empty is fine here: it means the API is off)."""
+    if token and len(token) < TOKEN_MIN:
+        return f"{PREFIX}API_TOKEN is too short: use at least {TOKEN_MIN} characters (`openssl rand -hex 32`)"
+    if not all(33 <= ord(c) <= 126 for c in token):
+        return f"{PREFIX}API_TOKEN must be printable ASCII with no spaces"
+    return None
 
 
 def _check_names(env: dict[str, str]) -> None:
@@ -185,6 +204,20 @@ def from_env(env: dict[str, str]) -> Config:
                 f"{PREFIX}TRUSTED_PROXIES has {part!r}, which is not an address or network such as 172.18.0.0/16"
             ) from None
 
+    token = get("API_TOKEN")
+    problem = token_problem(token)
+    if problem:
+        raise ConfigError(problem)
+    max_window = _number(get("MAX_WINDOW_DAYS", "30"), "MAX_WINDOW_DAYS", 1)
+    self_max = _number(get("SELF_MAX_DAYS", str(min(14, max_window))), "SELF_MAX_DAYS", 1)
+    if self_max > max_window:
+        raise ConfigError(
+            f"{PREFIX}SELF_MAX_DAYS ({self_max}) cannot be more than {PREFIX}MAX_WINDOW_DAYS ({max_window})"
+        )
+    cooldown = _number(get("SELF_COOLDOWN_DAYS", "30"), "SELF_COOLDOWN_DAYS", 0)
+    if cooldown > 365:
+        raise ConfigError(f"{PREFIX}SELF_COOLDOWN_DAYS must be between 0 and 365")
+
     # Safe by default: nothing is sent or ended until DRY_RUN=false, and nothing is ended until BLOCK_SESSIONS=true.
     return Config(
         jellyfin_url=url,
@@ -197,7 +230,7 @@ def from_env(env: dict[str, str]) -> Config:
         exempt_users=frozenset(u.lower() for u in _items(get("EXEMPT_USERS"))),
         interval_seconds=_number(get("INTERVAL_SECONDS", "60"), "INTERVAL_SECONDS", 10),
         max_blocks_per_round=_number(get("MAX_BLOCKS_PER_ROUND", "3"), "MAX_BLOCKS_PER_ROUND", 1),
-        max_window_days=_number(get("MAX_WINDOW_DAYS", "30"), "MAX_WINDOW_DAYS", 1),
+        max_window_days=max_window,
         geoip_db=get("GEOIP_DB", "/data/dbip-country-lite.mmdb"),
         geoip_url=geoip_url,
         state_file=get("STATE_FILE", "/data/state.json"),
@@ -206,4 +239,8 @@ def from_env(env: dict[str, str]) -> Config:
         gateway_upstream=upstream,
         proxy_networks=tuple(proxies),
         audit_file=get("AUDIT_FILE"),
+        api_token=token,
+        api_bind=_bind(get("API_BIND", "127.0.0.1:8097"), "API_BIND"),
+        self_max_days=self_max,
+        self_cooldown_days=cooldown,
     )

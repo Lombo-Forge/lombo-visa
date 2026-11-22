@@ -11,6 +11,8 @@ lombo-visa geoip update [--force]        download the country database (monthly 
 lombo-visa gateway                       optional: refuse sign-ins from abroad before Jellyfin sees them (a reverse
                                          proxy sends only the sign-in paths here; see README)
 lombo-visa audit [--last N] [--user NAME]  show the decision log (needs LOMBO_VISA_AUDIT_FILE)
+lombo-visa api                           optional: a token-guarded local API so a signed-in person can open their own
+                                         travel window (needs LOMBO_VISA_API_TOKEN; see docs/contracts.md)
 """
 
 import argparse
@@ -23,7 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import __version__, audit, core, gateway, geoip, notify, state
+from . import __version__, api, audit, core, gateway, geoip, notify, state
 from .config import Config, ConfigError, from_env
 from .jellyfin import Jellyfin, JellyfinError
 
@@ -152,7 +154,33 @@ def doctor(cfg: Config, now: float) -> int:
     if cfg.block_sessions and cfg.dry_run:
         print("[WARN] BLOCK_SESSIONS is true but DRY_RUN is still true: nothing will be ended")
     ok = _doctor_gateway(cfg) and ok
+    _doctor_api(cfg)
     return 0 if ok else 1
+
+
+def _doctor_api(cfg: Config) -> None:
+    """Checks for `lombo-visa api`. Only warnings: the API is optional and settings errors already stop start-up."""
+    if not cfg.api_token:
+        print("[ ok ] self-service API: off (set LOMBO_VISA_API_TOKEN to let a page open a person's own travel window)")
+        return
+    host, port = cfg.api_bind
+    print(
+        f"[ ok ] self-service API: on at {host}:{port}; a person may open one window of up to {cfg.self_max_days} "
+        f"day(s), then wait {cfg.self_cooldown_days} day(s) after it ends"
+        + (" (cool-down off)" if cfg.self_cooldown_days == 0 else "")
+    )
+    if cfg.dry_run:
+        print("[ ok ] self-service API: DRY_RUN=true, so requests are checked and answered but no window is written")
+    if len(set(cfg.api_token)) < 10 or cfg.api_token == cfg.jellyfin_api_key:
+        print(
+            "[WARN] self-service API: the token looks weak or is the same as the Jellyfin key. "
+            "Make a fresh one: openssl rand -hex 32"
+        )
+    if not ipaddress.ip_address(host).is_loopback:
+        print(
+            f"[WARN] self-service API: {host}:{port} is not a loopback address. Only the service that calls it (for "
+            "example Shelf) may reach this port: use a private compose network or a firewall."
+        )
 
 
 def _doctor_gateway(cfg: Config) -> bool:
@@ -470,6 +498,7 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     gi = sub.add_parser("geoip").add_subparsers(dest="action", required=True)
     gi.add_parser("update").add_argument("--force", action="store_true")
     sub.add_parser("gateway")
+    sub.add_parser("api")
     au = sub.add_parser("audit")
     au.add_argument("--last", type=int, default=20)
     au.add_argument("--user")
@@ -494,6 +523,12 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
             return audit_cmd(cfg, args.last, args.user)
         if args.cmd == "gateway":
             return gateway.serve(cfg)
+        if args.cmd == "api":
+            if not cfg.api_token:
+                print("[FAIL] LOMBO_VISA_API_TOKEN is not set, so the API stays off. Make one with:", file=sys.stderr)
+                print("openssl rand -hex 32", file=sys.stderr)
+                return 2
+            return api.serve(cfg)
         while True:
             try:
                 run_once(cfg, time.time())

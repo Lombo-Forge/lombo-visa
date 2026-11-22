@@ -3,7 +3,8 @@
 - `devices`: users and devices that were allowed (key "userid:deviceid"), so they are never judged again.
   A device allowed by a travel window carries the window id, so it can be signed out when the window ends.
 - `noted`: new sessions already reported (log line and alert), so a round does not repeat itself.
-- `windows`: travel windows made with `lombo-visa travel add`.
+- `windows`: travel windows made with `lombo-visa travel add`, or by a person through the API (those carry
+  `"self": true`, which the cool-down reads).
 - `baselined`: the first run records the sessions that already exist as allowed.
 
 A missing file means "start fresh". A damaged one is moved aside (`state.json.bad-<time>`, with a loud warning) and
@@ -148,8 +149,26 @@ def windows(state: dict[str, Any]) -> list[Window]:
     return out
 
 
-def put_window(state: dict[str, Any], w: Window) -> None:
-    state["windows"][str(w.id)] = {
+def _is_self(entry: object) -> bool:
+    return isinstance(entry, dict) and entry.get("self") is True
+
+
+def self_ids(state: dict[str, Any]) -> set[int]:
+    """Ids of windows a person opened for themselves through the API (`"self": true`)."""
+    out: set[int] = set()
+    for key, entry in state["windows"].items():
+        if _is_self(entry):
+            try:
+                out.add(int(key))
+            except ValueError:
+                continue
+    return out
+
+
+def put_window(state: dict[str, Any], w: Window, own: bool = False) -> None:
+    """Store a window. `own=True` marks it self-opened; an existing mark is kept when the window is rewritten
+    (a revoke), so the cool-down still sees it."""
+    entry: dict[str, Any] = {
         "user_id": w.user_id,
         "user_name": w.user_name,
         "country": w.country,
@@ -157,15 +176,22 @@ def put_window(state: dict[str, Any], w: Window) -> None:
         "ends_at": w.ends_at,
         "revoked_at": w.revoked_at,
     }
+    if own or _is_self(state["windows"].get(str(w.id))):
+        entry["self"] = True
+    state["windows"][str(w.id)] = entry
+
+
+SELF_KEEP_SECONDS = 400 * 86400  # longer than the longest cool-down (365 days), so pruning never ends one early
 
 
 def prune(state: dict[str, Any], now: float) -> None:
-    """Forget old notes and windows that ended more than a month ago."""
+    """Forget old notes and windows that ended more than a month ago (self-opened ones: 400 days, for the cool-down)."""
     state["noted"] = {
         k: v for k, v in state["noted"].items() if isinstance(v, int | float) and now - v < NOTED_KEEP_SECONDS
     }
     in_use = {str(d.get("window")) for d in state["devices"].values() if isinstance(d, dict)}
     for key, w in list(state["windows"].items()):
         ends = w.get("ends_at") if isinstance(w, dict) else None
-        if isinstance(ends, int | float) and now - ends > 30 * 86400 and key not in in_use:
+        keep = SELF_KEEP_SECONDS if _is_self(w) else 30 * 86400
+        if isinstance(ends, int | float) and now - ends > keep and key not in in_use:
             del state["windows"][key]
