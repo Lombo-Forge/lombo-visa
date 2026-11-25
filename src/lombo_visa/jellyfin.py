@@ -4,7 +4,8 @@ Authentication uses an API key (Jellyfin: Dashboard > API Keys) in the Authoriza
 Every failure becomes a JellyfinError with a short message, so callers print it instead of crashing.
 
 Calls used: GET /Sessions (who is signed in, from which address), GET /Users (name to id, admin flag),
-DELETE /Devices?id= (sign a device out: Jellyfin removes the device and its access tokens).
+DELETE /Devices?id= (sign a device out: Jellyfin removes the device and its access tokens). Only with
+SELF_REQUIRE_PASSWORD: POST /Users/AuthenticateByName then POST /Sessions/Logout, to check a password.
 """
 
 import http.client
@@ -99,6 +100,33 @@ class Jellyfin:
         if not isinstance(raw, list):
             raise JellyfinError("/Users: answer is not a list")
         return [u for u in raw if isinstance(u, dict)]
+
+    def check_password(self, name: str, password: str) -> bool:
+        """Is this the account's password? Signs in and straight out again; the password is only passed on."""
+        client = 'MediaBrowser Client="lombo-visa", Device="password check", DeviceId="lombo-visa-check", Version="1"'
+        body = json.dumps({"Username": name, "Pw": password}).encode()
+        try:
+            req = urllib.request.Request(self.base + "/Users/AuthenticateByName", body, method="POST")  # noqa: S310
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", client)
+            with _OPENER.open(req, timeout=self.timeout) as resp:
+                token = str(json.loads(resp.read()).get("AccessToken") or "")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return False
+            raise JellyfinError(f"password check: HTTP {e.code}") from e
+        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError, AttributeError) as e:
+            raise JellyfinError(f"password check: {type(e).__name__}") from e
+        if not token:
+            return False
+        try:
+            out = urllib.request.Request(self.base + "/Sessions/Logout", b"", method="POST")  # noqa: S310
+            out.add_header("Authorization", f'{client}, Token="{token}"')
+            with _OPENER.open(out, timeout=self.timeout):
+                pass
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+            raise JellyfinError(f"password check: could not sign out again ({type(e).__name__})") from e
+        return True
 
     def sign_out_device(self, device_id: str) -> None:
         """Remove the device and with it its access tokens. A 404 means it is already gone."""

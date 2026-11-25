@@ -4,7 +4,8 @@ A reverse proxy sends only Jellyfin's sign-in paths here. For each one the gatew
 client, looks for a travel window and decides with the same rules as the session mode (`core.decide`). Allowed: the
 request goes to Jellyfin as it came and Jellyfin's answer comes back as it is. Refused: a plain 403.
 
-It is never a general proxy: any other path, and any method but POST, gets a 404 and goes nowhere.
+It is never a general proxy: any other path, and any method but POST, gets a 404 and goes nowhere. The one
+exception, off unless ASK_PAGE=true, is its own page at /visa/ask (ask.py), which is never forwarded.
 Every doubt allows: no country database, an unknown address, unreadable travel windows, mode `off` or `log`, a
 Jellyfin that cannot be asked who someone is. Nothing here reads or keeps a password, a token or the Authorization
 header beyond passing them on to the configured upstream; request bodies are never logged or stored.
@@ -26,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from . import audit, core, geoip, state
+from . import ask, audit, core, geoip, state
 from .config import Config
 from .jellyfin import Jellyfin, JellyfinError
 
@@ -189,6 +190,7 @@ class Gateway:
         self._port = up.port or (443 if self._tls else 80)
         self._netloc = up.netloc
         self._exempt_ids = {core.clean_id(x) for x in cfg.exempt_users}
+        self.asks = ask.Asks(cfg, self.log)
 
     # -- helpers
     def log(self, text: str) -> None:
@@ -240,6 +242,19 @@ class Gateway:
     def _record(self, kind: str, decision: str, country: str, user: str, ip: str | None, shown: str) -> None:
         audit.record(self.cfg.audit_file, "gateway", decision, country, user, ip, self.clock())
         self.log(f"{shown} ({kind}) country={country} user={core.clean_text(user)}")
+
+    def refusal(self) -> Reply:
+        reply = _json_reply(403, "Forbidden", self.cfg.gateway_message or REFUSAL)
+        if not self.cfg.ask_page:
+            return reply
+        body = json.dumps({**json.loads(reply.body), "away": ask.PATH}).encode()
+        return Reply(reply.status, reply.reason, reply.headers, body)
+
+    def asked(self, content_type: str, body: bytes, ip: str | None) -> Reply:
+        country = core.country_of(ip or "", self._countries, self.cfg.lan_subnets)
+        status, message = self.asks.ask(ask.name_from(content_type, body), ip or "?", country)
+        reason = {200: "OK", 422: "Unprocessable Content", 429: "Too Many Requests"}[status]
+        return Reply(status, reason, [("Content-Type", "text/plain; charset=utf-8")], message.encode())
 
     # -- forwarding
     def forward(self, method: str, target: str, headers: list[tuple[str, str]], body: bytes) -> Reply:
@@ -310,7 +325,7 @@ class Gateway:
         user = name or path_id
         if verdict == core.DENY and enforce:
             self._record(kind, core.DENY, country, user, ip, "refused")
-            return _json_reply(403, "Forbidden", self.cfg.gateway_message or REFUSAL)
+            return self.refusal()
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(kind, shown, country, user, ip, shown)
         return send()
@@ -338,7 +353,7 @@ class Gateway:
             if isinstance(token, str) and token:
                 self._logout(token)
             self._record(QUICKCONNECT, core.DENY, country, name, ip, "refused")
-            return _json_reply(403, "Forbidden", self.cfg.gateway_message or REFUSAL)
+            return self.refusal()
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(QUICKCONNECT, shown, country, name, ip, shown)
         return reply
@@ -403,14 +418,23 @@ class _Handler(BaseHTTPRequestHandler):
             return self._not_found
         raise AttributeError(name)
 
+    def _asking(self) -> bool:
+        return self.server.gateway.cfg.ask_page and self.path.partition("?")[0] == ask.PATH
+
+    def do_GET(self) -> None:
+        if not self._asking():
+            self._not_found()
+            return
+        headers = [("Content-Type", "text/html; charset=utf-8"), ("Cache-Control", "no-store")]
+        self._send(Reply(200, "OK", headers, ask.page(self.server.gateway.cfg)))
+
     def do_POST(self) -> None:
         self._send(self._answer())
 
     def _answer(self) -> Reply:
         found = classify(self.path)
-        if found is None:
+        if found is None and not self._asking():
             return _json_reply(404, "Not Found", "Not found.")
-        kind, path_id = found
         pairs = list(self.headers.items())
         if len(pairs) > MAX_HEADERS or sum(len(k) + len(v) for k, v in pairs) > MAX_HEADER_BYTES:
             return _json_reply(431, "Request Header Fields Too Large", "Too many or too large headers.")
@@ -433,6 +457,9 @@ class _Handler(BaseHTTPRequestHandler):
         ip, ignored = client_address(str(self.client_address[0]), forwarded, gw.cfg.proxy_networks)
         if ignored:
             gw.note_ignored_header()
+        if found is None:
+            return gw.asked(self.headers.get("Content-Type", ""), body, ip)
+        kind, path_id = found
         return gw.process(kind, path_id, self.command, self.path, pairs, body, ip)
 
 

@@ -28,6 +28,7 @@ MAX_BODY = 4096  # bytes of request body
 MAX_FAILURES = 10  # bad or missing tokens per client per window, then 429
 WINDOW = 60.0  # seconds
 MAX_CLIENTS = 1024  # failure records kept at once
+PASSWORD_TRIES, PASSWORD_WINDOW = 2, 3600.0  # wrong passwords per account per hour
 TIMEOUT = 10.0  # seconds a client may stall on one request
 
 Reply = tuple[int, dict[str, Any], dict[str, str] | None]  # status, JSON body, extra headers
@@ -75,8 +76,8 @@ def parse_user_id(raw: str) -> str | None:
     return text if re.fullmatch(r"[0-9a-f]{32}", text) and re.fullmatch(r"[0-9a-fA-F-]{32,36}", raw) else None
 
 
-def parse_open_body(raw: bytes) -> tuple[tuple[str, int] | None, str]:
-    """((user_id, days), "") for a valid body, else (None, why). Strict: exactly two keys, no duplicates, no NaN."""
+def strict_json(raw: bytes) -> tuple[Any, str]:
+    """(value, "") or (None, why). No duplicate keys, no NaN."""
 
     def no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -93,15 +94,45 @@ def parse_open_body(raw: bytes) -> tuple[tuple[str, int] | None, str]:
         data = json.loads(raw.decode("utf-8"), object_pairs_hook=no_duplicates, parse_constant=refuse)
     except (ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
         return None, "the body must be strict JSON"
-    if not isinstance(data, dict) or set(data) != {"user_id", "days"}:
-        return None, 'the body must be exactly {"user_id": "...", "days": 7}'
+    return data, ""
+
+
+def parse_open_body(raw: bytes, password: bool = False) -> tuple[tuple[str, int, str] | None, str]:
+    """((user_id, days, password), "") for a valid body, else (None, why). Strict: exactly the expected keys."""
+    data, why = strict_json(raw)
+    if why:
+        return None, why
+    keys = {"user_id", "days", "password"} if password else {"user_id", "days"}
+    if not isinstance(data, dict) or set(data) != keys:
+        return None, f"the body must have exactly these keys: {', '.join(sorted(keys))}"
+    given = data.get("password", "")
+    if not isinstance(given, str) or len(given) > 200:
+        return None, "password must be a string of at most 200 characters"
     days = data["days"]
     if not isinstance(data["user_id"], str) or not isinstance(days, int) or isinstance(days, bool):
         return None, "user_id must be a string and days a whole number"
     user_id = parse_user_id(data["user_id"])
     if user_id is None:
         return None, "user_id must be a Jellyfin user id (32 hex characters)"
-    return (user_id, days), ""
+    return (user_id, days, given), ""
+
+
+def parse_admin_body(raw: bytes) -> tuple[tuple[str, int, str | None] | None, str]:
+    """((user_id, days, country), "") for a valid admin body, else (None, why)."""
+    data, why = strict_json(raw)
+    if why:
+        return None, why
+    if not isinstance(data, dict) or not {"user_id", "days"} <= set(data) <= {"user_id", "days", "country"}:
+        return None, 'the body must be {"user_id": "...", "days": 7} with an optional "country"'
+    days, country, raw_id = data["days"], data.get("country"), data["user_id"]
+    if not isinstance(raw_id, str) or not isinstance(days, int) or isinstance(days, bool):
+        return None, "user_id must be a string and days a whole number"
+    if country is not None and not isinstance(country, str):
+        return None, "country must be two letters or left out"
+    user_id = parse_user_id(raw_id)
+    if user_id is None:
+        return None, "user_id must be a Jellyfin user id (32 hex characters)"
+    return (user_id, days, country or None), ""
 
 
 def _end(w: core.Window) -> float:
@@ -114,6 +145,21 @@ class Travel:
 
     def __init__(self, cfg: Config, clock: Callable[[], float] = time.time) -> None:
         self.cfg, self.clock = cfg, clock
+        self.wrong: dict[str, deque[float]] = {}  # wrong passwords per account; under 3, Jellyfin's usual lockout
+        self.wrong_lock = threading.Lock()
+
+    def _password_refusal(self, user_id: str, name: str, password: str) -> Reply | None:
+        with self.wrong_lock:  # one check at a time, so parallel guesses cannot all slip under the limit
+            now = self.clock()
+            tries = self.wrong.setdefault(user_id, deque())
+            while tries and now - tries[0] >= PASSWORD_WINDOW:
+                tries.popleft()
+            if len(tries) >= PASSWORD_TRIES:
+                return fail(429, "too many wrong passwords; wait an hour")
+            if password and Jellyfin(self.cfg.jellyfin_url, self.cfg.jellyfin_api_key).check_password(name, password):
+                return None
+            tries.append(now)
+            return fail(422, "that password is not right")
 
     def _view(self, st: dict[str, Any], user_id: str, now: float) -> dict[str, Any]:
         mine = [w for w in state.windows(st) if w.user_id == user_id]
@@ -133,7 +179,7 @@ class Travel:
         st = state.load(self.cfg.state_file, quarantine=False)  # a damaged file is reported, never moved aside here
         return 200, {"ok": True, **self._view(st, user_id, self.clock())}, None
 
-    def open(self, user_id: str, days: int) -> Reply:
+    def open(self, user_id: str, days: int, password: str = "") -> Reply:
         cfg = self.cfg
         if not 1 <= days <= cfg.self_max_days:
             return fail(422, f"days must be a whole number from 1 to {cfg.self_max_days}")
@@ -144,6 +190,10 @@ class Travel:
         if (user.get("Policy") or {}).get("IsAdministrator"):
             return fail(422, "administrator accounts cannot do this; use your admin tools")
         name = str(user.get("Name", ""))
+        if cfg.self_require_password:
+            refused = self._password_refusal(user_id, name, password)
+            if refused:
+                return refused
         now = self.clock()
         with state.locked(cfg.state_file):  # the same lock `run`, `travel add` and the gateway's rounds use
             st = state.load(cfg.state_file, quarantine=False)
@@ -166,6 +216,52 @@ class Travel:
         message = f"travel window opened for {days} day(s)"
         return 200, {"ok": True, "message": message, "active": {"id": w.id, "ends": int(w.ends_at)}}, None
 
+    # -- the owner's own tools (a dashboard), behind ADMIN_TOKEN. Same effect as `lombo-visa travel`.
+    def list_windows(self) -> Reply:
+        st = state.load(self.cfg.state_file, quarantine=False)
+        own, now = state.self_ids(st), self.clock()
+        rows = [
+            {"id": w.id, "user_id": w.user_id, "name": w.user_name, "country": w.country,
+             "starts": int(w.starts_at), "ends": int(w.ends_at), "self": w.id in own}
+            for w in sorted(state.windows(st), key=lambda w: w.ends_at)
+            if w.revoked_at is None and w.ends_at > now
+        ]  # fmt: skip
+        return 200, {"ok": True, "windows": rows, "max_days": self.cfg.max_window_days}, None
+
+    def admin_add(self, user_id: str, days: int, country: str | None) -> Reply:
+        cfg = self.cfg
+        users = Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key).users()
+        user = next((u for u in users if core.clean_id(u.get("Id")) == user_id), None)
+        if user is None:
+            return fail(422, "that account was not found")
+        if (user.get("Policy") or {}).get("IsAdministrator"):
+            return fail(422, "administrator accounts do not get travel windows")
+        name, now = str(user.get("Name", "")), self.clock()
+        with state.locked(cfg.state_file):
+            st = state.load(cfg.state_file, quarantine=False)
+            try:
+                w = core.new_window(state.windows(st), user_id, name, days, country, now, cfg.max_window_days)
+            except ValueError as e:  # our own plain messages about days and country
+                return fail(422, str(e))
+            state.put_window(st, w)
+            state.save(cfg.state_file, st)
+        audit.record(cfg.audit_file, "api", "admin-window", "", name, None, now)
+        return 200, {"ok": True, "message": f"travel window opened for {days} day(s)", "id": w.id}, None
+
+    def revoke(self, window_id: int) -> Reply:
+        now = self.clock()
+        with state.locked(self.cfg.state_file):
+            st = state.load(self.cfg.state_file, quarantine=False)
+            old = next((w for w in state.windows(st) if w.id == window_id and w.revoked_at is None), None)
+            if old is None:
+                return fail(404, "no such open window")
+            state.put_window(
+                st, core.Window(old.id, old.user_id, old.user_name, old.country, old.starts_at, old.ends_at, now)
+            )
+            state.save(self.cfg.state_file, st)
+        audit.record(self.cfg.audit_file, "api", "admin-revoke", "", old.user_name, None, now)
+        return 200, {"ok": True, "message": "window revoked"}, None
+
 
 def make_server(
     cfg: Config,
@@ -175,7 +271,7 @@ def make_server(
     log: Callable[[str], None] | None = None,
 ) -> ThreadingHTTPServer:
     """Build the server (not started). `bind` overrides API_BIND (tests use port 0)."""
-    token = cfg.api_token.encode()
+    token, admin_token = cfg.api_token.encode(), cfg.admin_token.encode()
     limiter = FailureLimiter(limiter_clock)
     travel = Travel(cfg, clock)
 
@@ -205,36 +301,68 @@ def make_server(
             shape = "/v1/travel" if urlsplit(self.path).path == "/v1/travel" else "other"
             if urlsplit(self.path).path.startswith("/v1/travel/"):
                 shape = "/v1/travel/{id}"
+            if urlsplit(self.path).path.startswith("/v1/admin/"):
+                shape = "/v1/admin"
             say(f"[api] {core.clean_text(self.command, 8)} {shape} -> {code}")
 
-        def _authorised(self) -> bool:
+        def _authorised(self, expected: bytes) -> bool:
             client = self.client_address[0]
             if limiter.blocked(client):
                 self._send(*fail(429, "too many failed tries; wait a minute", {"Retry-After": str(int(WINDOW))}))
                 return False
             scheme, _, given = (self.headers.get("Authorization") or "").partition(" ")
-            if scheme.lower() == "bearer" and hmac.compare_digest(given.strip().encode(), token):
+            # An unset token matches nothing: with only one of the two set, its routes alone answer.
+            if expected and scheme.lower() == "bearer" and hmac.compare_digest(given.strip().encode(), expected):
                 return True
             limiter.record(client)
             self._send(*fail(401, "unauthorized", {"WWW-Authenticate": "Bearer"}))
             return False
 
         def _dispatch(self) -> None:
-            if self._authorised():
-                self._send(*self._handle(urlsplit(self.path).path))
+            route = urlsplit(self.path).path
+            admin = route.startswith("/v1/admin/")
+            if self._authorised(admin_token if admin else token):
+                self._send(*self._handle(route))
 
         def _handle(self, route: str) -> Reply:
             who = route.removeprefix("/v1/travel/") if route.startswith("/v1/travel/") else None
+            if route.startswith("/v1/admin/"):
+                return self._guarded(lambda: self._admin(route))
             if route != "/v1/travel" and who is None:
                 return fail(404, "not found")
             allowed = "POST" if who is None else "GET"
             if self.command != allowed:
                 return fail(405, f"use {allowed} here", {"Allow": allowed})
+
+            def self_service() -> Reply:
+                if who is None:
+                    return self._open()
+                user_id = parse_user_id(who)
+                return fail(400, "that is not a Jellyfin user id") if user_id is None else travel.status(user_id)
+
+            return self._guarded(self_service)
+
+        def _admin(self, route: str) -> Reply:
+            if route == "/v1/admin/windows":
+                if self.command == "GET":
+                    return travel.list_windows()
+                if self.command != "POST":
+                    return fail(405, "use GET or POST here", {"Allow": "GET, POST"})
+                raw, problem = self._body()
+                if problem:
+                    return problem
+                parsed, why = parse_admin_body(raw)
+                return fail(400, why) if parsed is None else travel.admin_add(*parsed)
+            number = route.removeprefix("/v1/admin/windows/")
+            if number == route or not re.fullmatch(r"[0-9]{1,9}", number):
+                return fail(404, "not found")
+            if self.command != "DELETE":
+                return fail(405, "use DELETE here", {"Allow": "DELETE"})
+            return travel.revoke(int(number))
+
+        def _guarded(self, work: Callable[[], Reply]) -> Reply:
             try:
-                if who is not None:
-                    user_id = parse_user_id(who)
-                    return fail(400, "that is not a Jellyfin user id") if user_id is None else travel.status(user_id)
-                return self._open()
+                return work()
             except (JellyfinError, state.StateError) as e:  # nothing was written; the detail goes to the log only
                 say(f"[FAIL] api: {core.clean_text(e, 200)}")
                 return fail(502, "could not complete the request; try again later")
@@ -242,16 +370,22 @@ def make_server(
                 say(f"[FAIL] api: {type(e).__name__}")
                 return fail(500, "error")
 
-        def _open(self) -> Reply:
+        def _body(self) -> tuple[bytes, Reply | None]:
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             length_text = self.headers.get("Content-Length")
             if ctype != "application/json":
-                return fail(415, "send Content-Type: application/json")
+                return b"", fail(415, "send Content-Type: application/json")
             if length_text is None or not length_text.isdigit():
-                return fail(411, "send a Content-Length")
+                return b"", fail(411, "send a Content-Length")
             if int(length_text) > MAX_BODY:
-                return fail(413, f"the body may be at most {MAX_BODY} bytes")
-            parsed, why = parse_open_body(self.rfile.read(int(length_text)))
+                return b"", fail(413, f"the body may be at most {MAX_BODY} bytes")
+            return self.rfile.read(int(length_text)), None
+
+        def _open(self) -> Reply:
+            raw, problem = self._body()
+            if problem:
+                return problem
+            parsed, why = parse_open_body(raw, cfg.self_require_password)
             if parsed is None:
                 return fail(400, why)
             return travel.open(*parsed)

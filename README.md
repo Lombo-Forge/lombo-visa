@@ -74,7 +74,7 @@ Three stages, so you can trust it step by step: **dry run** (default: prints wha
 
 What it **never** does: delete or change users, passwords or policies; touch libraries or media; end a session that is already known; end anything when the country is unknown, when the database is missing, or when more than `MAX_BLOCKS_PER_ROUND` different accounts are denied in one round (a safety stop for setup mistakes); block an account in `EXEMPT_USERS`; sit in the path of your traffic (if it stops, Jellyfin carries on as before).
 
-More in [docs/how-it-works.md](docs/how-it-works.md) and [docs/security-review.md](docs/security-review.md).
+More in [docs/integrate.md](docs/integrate.md) (building it into your own dashboard), [docs/how-it-works.md](docs/how-it-works.md) and [docs/security-review.md](docs/security-review.md).
 
 ## Install in a minute
 
