@@ -31,6 +31,7 @@ SETTINGS = (
     "GEOIP_URL",
     "STATE_FILE",
     "GATEWAY_MODE",
+    "GATEWAY_MESSAGE",
     "GATEWAY_BIND",
     "GATEWAY_UPSTREAM",
     "TRUSTED_PROXIES",
@@ -75,6 +76,7 @@ class Config:
     api_bind: tuple[str, int] = ("127.0.0.1", 8097)
     self_max_days: int = 14
     self_cooldown_days: int = 30
+    gateway_message: str = ""  # empty = the built-in refusal text
 
     @property
     def gateway_effective_mode(self) -> str:
@@ -235,6 +237,7 @@ def from_env(env: dict[str, str]) -> Config:
         geoip_url=geoip_url,
         state_file=get("STATE_FILE", "/data/state.json"),
         gateway_mode=gateway_mode,
+        gateway_message=get("GATEWAY_MESSAGE")[:300],
         gateway_bind=_bind(get("GATEWAY_BIND", "127.0.0.1:8099")),
         gateway_upstream=upstream,
         proxy_networks=tuple(proxies),

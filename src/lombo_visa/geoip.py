@@ -145,6 +145,7 @@ def fetch(url: str, timeout: float = 60, max_seconds: float = MAX_SECONDS) -> by
     if parsed.scheme not in ALLOWED_SCHEMES or not parsed.hostname:
         raise GeoIpError("the database URL must start with https://")
     opener = urllib.request.build_opener(_SameHostHttps(parsed.netloc))
+    opener.addheaders = [("User-Agent", "lombo-visa")]  # the default source answers 403 to Python's own
     deadline = time.monotonic() + max_seconds
     try:
         with opener.open(url, timeout=timeout) as resp:

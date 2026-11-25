@@ -110,7 +110,7 @@ Setup details, including making Jellyfin see real client addresses behind a prox
 
 Everything is an environment variable with the `LOMBO_VISA_` prefix, listed with defaults in [.env.example](.env.example). A bad value, or a name that is not a setting (a typo such as `EXEMPT_USER`), stops the app at start-up and names the variable.
 
-The gateway settings are `LOMBO_VISA_GATEWAY_MODE` (`off`, `log` (default) or `enforce`), `LOMBO_VISA_GATEWAY_BIND` (default `127.0.0.1:8099`), `LOMBO_VISA_GATEWAY_UPSTREAM` (default: the Jellyfin address) and `LOMBO_VISA_TRUSTED_PROXIES`; the audit log is `LOMBO_VISA_AUDIT_FILE`. The self-service travel API has `LOMBO_VISA_API_TOKEN` (empty = off), `LOMBO_VISA_API_BIND` (default `127.0.0.1:8097`), `LOMBO_VISA_SELF_MAX_DAYS` (default 14) and `LOMBO_VISA_SELF_COOLDOWN_DAYS` (default 30).
+The gateway settings are `LOMBO_VISA_GATEWAY_MODE` (`off`, `log` (default) or `enforce`), `LOMBO_VISA_GATEWAY_BIND` (default `127.0.0.1:8099`), `LOMBO_VISA_GATEWAY_UPSTREAM` (default: the Jellyfin address), `LOMBO_VISA_GATEWAY_MESSAGE` (the refusal text) and `LOMBO_VISA_TRUSTED_PROXIES`; the audit log is `LOMBO_VISA_AUDIT_FILE`. The self-service travel API has `LOMBO_VISA_API_TOKEN` (empty = off), `LOMBO_VISA_API_BIND` (default `127.0.0.1:8097`), `LOMBO_VISA_SELF_MAX_DAYS` (default 14) and `LOMBO_VISA_SELF_COOLDOWN_DAYS` (default 30).
 
 ## Gateway mode
 
