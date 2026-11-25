@@ -1,8 +1,8 @@
 # Security review
 
-> **This is the author's own review.** LomboVisa has **not had an independent review** and has **not been run against a real Jellyfin
-> server**; only against a fake one in the tests. Treat every statement about how Jellyfin behaves as unconfirmed until the checklist at
-> the end is done. Written 2026-11-20. An unattended audit on 2026-11-21 (read-only, reproductions against the fake server only) found the
+> **This is the author's own review.** LomboVisa has **not had an independent review** and has **not been run on a live server**; it has run against a
+> fake Jellyfin and a throwaway one ([the run below](#real-server-run-2026-11-25)). Treat other statements about how Jellyfin behaves as unconfirmed until the
+> checklist at the end is done. Written 2026-11-20. An unattended audit on 2026-11-21 (read-only, reproductions against the fake server only) found the
 > issues listed under [Audit findings](#audit-findings-2026-11-21); all are fixed and each has a regression test. That audit never saw a
 > real Jellyfin either, and it was not a person reading the code, so the review items in the checklist stay open.
 

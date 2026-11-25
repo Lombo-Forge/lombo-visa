@@ -28,7 +28,7 @@ refuses nothing until you set **both** `LOMBO_VISA_DRY_RUN=false` and `LOMBO_VIS
 only logs what it would have refused. **Keep your reverse proxy's rate limits and Jellyfin's own lockout switched on in either
 mode:** neither stops password guessing. Security notes for the gateway and the audit log: [docs/security.md](docs/security.md).
 
-> **Status: not release-ready.** LomboVisa has **not been run against a real Jellyfin server** (only against a fake one in the tests) and has **not had an independent security review**. [docs/security-review.md](docs/security-review.md) is the author's own threat model and a checklist to tick before trusting it. Until then keep it in dry-run mode.
+> **Status: early.** The gateway, travel windows and API have run against a throwaway Jellyfin 12.4 and Caddy ([test/real-jellyfin](test/real-jellyfin/)), not yet on a live server, with phone or TV apps, or with nginx, and there has been **no independent security review**. [docs/security-review.md](docs/security-review.md) is the author's own threat model and a checklist to tick before trusting it. Until then keep it in dry-run mode.
 
 ```text
 $ lombo-visa plan

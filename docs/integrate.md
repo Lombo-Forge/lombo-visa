@@ -35,8 +35,12 @@ rules have to live in your code. Everything here is optional and off until you s
 
 ## Admin dashboard
 
-Send `Authorization: Bearer $LOMBO_VISA_ADMIN_TOKEN`. This token can allow any account from anywhere, so protect your
-dashboard's own sign-in at least as well as Jellyfin's. It cannot allow Jellyfin administrator accounts.
+> **Accepted risk: you take this on when you set the token.** Whoever holds `LOMBO_VISA_ADMIN_TOKEN` can let any
+> non-administrator account sign in from anywhere. **It must never be reachable from the internet**: keep the API port
+> on a private network, never publish it, never send the token to a browser, and protect your dashboard's own sign-in at
+> least as well as Jellyfin's. If it leaks, change it and restart `api`, then check `lombo-visa travel list`.
+
+Send `Authorization: Bearer $LOMBO_VISA_ADMIN_TOKEN`. It cannot allow Jellyfin administrator accounts.
 
 | Request | Body | Answer |
 |---|---|---|

@@ -141,7 +141,8 @@ times, `"self": true`), like `travel add`; the audit log, if on, gets the user's
 ## Admin routes, password check and ask page
 
 All off by default. **Admin routes** (`ADMIN_TOKEN`): the strongest secret here after the Jellyfin key; whoever has it can
-allow any non-administrator from anywhere. It must differ from `API_TOKEN`; ten bad tries a minute per client are blocked.
+allow any non-administrator from anywhere. This is an accepted risk of turning the routes on: nothing in the app limits
+where the token is used from, so it must never be reachable from the internet. It must differ from `API_TOKEN`; ten bad tries a minute per client are blocked.
 **Password check**: the password crosses your private network to the API in plain HTTP, as it does to Jellyfin behind a
 proxy; wrong ones count toward Jellyfin's own lockout, which is why only two an hour per account are passed on (the count
 is lost on restart). The check is itself a sign-in from the app's own address, ended at once. **Ask page**: no sign-in,
