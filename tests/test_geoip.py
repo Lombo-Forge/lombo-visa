@@ -503,3 +503,29 @@ def test_codes_lists_what_the_file_can_answer(tmp_path):
     assert r.records() == []
     with pytest.raises(MmdbError, match="too many"):
         Reader(mb.build(NETWORKS)).records(limit=1)
+
+
+def test_the_download_names_itself():
+    # The default source answers 403 to Python's own User-Agent.
+    seen = []
+
+    class Agent(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen.append(self.headers.get("User-Agent"))
+            self.send_response(404)
+            self.end_headers()
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), Agent)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    saved = geoip.ALLOWED_SCHEMES
+    geoip.ALLOWED_SCHEMES = ("https", "http")
+    try:
+        with pytest.raises(geoip.GeoIpError):
+            geoip.fetch(f"http://127.0.0.1:{httpd.server_port}/x.gz")
+    finally:
+        geoip.ALLOWED_SCHEMES = saved
+        httpd.shutdown()
+    assert seen == ["lombo-visa"]

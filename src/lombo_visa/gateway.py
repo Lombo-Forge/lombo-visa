@@ -310,7 +310,7 @@ class Gateway:
         user = name or path_id
         if verdict == core.DENY and enforce:
             self._record(kind, core.DENY, country, user, ip, "refused")
-            return _json_reply(403, "Forbidden", REFUSAL)
+            return _json_reply(403, "Forbidden", self.cfg.gateway_message or REFUSAL)
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(kind, shown, country, user, ip, shown)
         return send()
@@ -338,7 +338,7 @@ class Gateway:
             if isinstance(token, str) and token:
                 self._logout(token)
             self._record(QUICKCONNECT, core.DENY, country, name, ip, "refused")
-            return _json_reply(403, "Forbidden", REFUSAL)
+            return _json_reply(403, "Forbidden", self.cfg.gateway_message or REFUSAL)
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(QUICKCONNECT, shown, country, name, ip, shown)
         return reply
@@ -378,7 +378,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(reply.body)))
         self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(reply.body)
+        with contextlib.suppress(OSError):  # the client hung up: nothing to report
+            self.wfile.write(reply.body)
         self._drain()
 
     def _drain(self) -> None:

@@ -14,6 +14,19 @@ jellyfin.example.com {
 	handle {
 		reverse_proxy jellyfin:8096
 	}
+
+	# Fail open: if the gateway is down, sign-ins go straight to Jellyfin instead of failing for everyone (session
+	# mode, if you run it, still signs foreign ones out afterwards). Delete this block to refuse sign-ins instead.
+	handle_errors {
+		@gateway_down {
+			expression {err.status_code} in [502, 503, 504]
+			path_regexp (?i)authenticate
+		}
+		handle @gateway_down {
+			rewrite * {http.request.orig_uri}
+			reverse_proxy jellyfin:8096
+		}
+	}
 }
 
 # Keep your own rate limit on the sign-in paths (a Caddy plugin or another layer) and keep Jellyfin's lockout on:
@@ -22,4 +35,5 @@ jellyfin.example.com {
 # Caddy sets X-Forwarded-For to the client's address by itself when it is the first proxy. Put Caddy's address in
 # LOMBO_VISA_TRUSTED_PROXIES (for a compose network, its subnet, e.g. 172.18.0.0/16). If another proxy or a CDN is
 # in front of Caddy, Caddy must be told to trust it (`servers { trusted_proxies static <its networks> }`), or the
-# gateway will see the CDN's address instead of the visitor's.
+# gateway will see the CDN's address instead of the visitor's. Add `trusted_proxies_strict` beside it, or a visitor
+# can put a home address in front of their own and be believed.

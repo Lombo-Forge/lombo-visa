@@ -193,6 +193,12 @@ def test_foreign_sign_in_without_a_window_is_refused_before_jellyfin(start, up):
     assert (row["mode"], row["decision"], row["country"], row["user"]) == ("gateway", "deny", "DE", "Pat")
 
 
+def test_the_refusal_text_can_be_set(start, env):
+    env["LOMBO_VISA_GATEWAY_MESSAGE"] = "Ask Sam to allow your trip."
+    status, _, body = start().send(ip=ABROAD)
+    assert (status, json.loads(body)["detail"]) == (403, "Ask Sam to allow your trip.")
+
+
 def test_a_travel_window_lets_the_sign_in_through(start, up, env):
     give_window(env)
     gw = start()

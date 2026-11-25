@@ -180,6 +180,19 @@ generated files; nothing here has been seen against a real Jellyfin.
 | 13 | Device cap (5000) makes later sessions judged again | **Not changed** (needs 5000 devices); written down here. |
 | 14 | Smaller points | **Fixed:** README and docs now say that `run` in dry run still writes the state file and only `plan` writes nothing; exempt account ids match with or without dashes. The state file is synced before the rename. |
 
+## Real-server run (2026-11-25)
+
+`test/real-jellyfin/run.sh`: a throwaway Jellyfin 12.4, Caddy 2 with `examples/Caddyfile`, the real country database, a
+visitor's address simulated through `X-Forwarded-For`. Passed: home and LAN sign-ins; abroad refused for password,
+legacy, Quick Connect and 20 odd spellings of the path; no device or session left by a refusal; Jellyfin recorded the
+visitor's address with the gateway in Known proxies; a travel window let one account in and its revoke signed the device
+out (with `run` going); gateway stopped = sign-ins still work. It found two bugs, both fixed: the database download got
+403, and the Caddy example did not fail open. Not covered: phone and TV apps, nginx, an independent reviewer.
+
+**Not defended: swamping a fail-open proxy.** With 80 and 400 half-sent sign-ins hanging, foreign attempts got 502 or
+503 and no token. That is two runs, not a proof: an attacker who can make the proxy fail to reach the gateway gets the
+fail-open path. Keep a rate limit on the sign-in paths, or delete `handle_errors` to refuse instead.
+
 ## Summary: what is not defended
 
 - Password guessing, and the first minute of any successful sign-in from abroad.
