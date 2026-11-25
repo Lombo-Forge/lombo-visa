@@ -102,7 +102,7 @@ def run() -> None:
 
     r = login("viewer", HOME_IP, "home-dev")
     check("home country: password sign-in works", r[0] == 200 and got_token(r), r)
-    r = login("viewer", "192.168.1.5", "lan-dev")
+    r = login("viewer", "10.20.1.5", "lan-dev")
     check("home network: password sign-in works", r[0] == 200, r)
     r = login("viewer", AWAY_IP, "away-1")
     check("abroad: password sign-in refused with 403", r[0] == 403 and not got_token(r), r)
