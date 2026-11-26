@@ -137,3 +137,14 @@ times, `"self": true`), like `travel add`; the audit log, if on, gets the user's
 - The travel API has been called only by the tests (real socket, fake Jellyfin). No real page service (such as the Shelf plugin) has
   called it, and what a real Jellyfin returns for `GET /Users` is assumed from its API.
 - No load test and no independent review.
+
+## Admin routes, password check and ask page
+
+All off by default. **Admin routes** (`ADMIN_TOKEN`): the strongest secret here after the Jellyfin key; whoever has it can
+allow any non-administrator from anywhere. This is an accepted risk of turning the routes on: nothing in the app limits
+where the token is used from, so it must never be reachable from the internet. It must differ from `API_TOKEN`; ten bad tries a minute per client are blocked.
+**Password check**: the password crosses your private network to the API in plain HTTP, as it does to Jellyfin behind a
+proxy; wrong ones count toward Jellyfin's own lockout, which is why only two an hour per account are passed on (the count
+is lost on restart). The check is itself a sign-in from the app's own address, ended at once. **Ask page**: no sign-in,
+so anyone can send you a message with any name; the limits cap it, and someone can use up the 20 an hour so a real
+request is turned away. It never says whether an account exists.

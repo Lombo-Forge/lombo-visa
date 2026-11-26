@@ -160,6 +160,16 @@ def doctor(cfg: Config, now: float) -> int:
 
 def _doctor_api(cfg: Config) -> None:
     """Checks for `lombo-visa api`. Only warnings: the API is optional and settings errors already stop start-up."""
+    if cfg.admin_token:
+        host, port = cfg.api_bind
+        print(
+            f"[WARN] admin API: on at {host}:{port}. Whoever holds LOMBO_VISA_ADMIN_TOKEN can allow any account from "
+            "anywhere: only your own dashboard may reach this port, never the internet."
+        )
+    if cfg.ask_page and not cfg.webhook_url:
+        print("[WARN] ask page: LOMBO_VISA_WEBHOOK_URL is empty, so nobody hears when someone asks to be let in")
+    if cfg.ask_page_file and not os.path.isfile(cfg.ask_page_file):
+        print("[WARN] ask page: LOMBO_VISA_ASK_PAGE_FILE is not a file: the built-in page is shown")
     if not cfg.api_token:
         print("[ ok ] self-service API: off (set LOMBO_VISA_API_TOKEN to let a page open a person's own travel window)")
         return
@@ -524,8 +534,9 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
         if args.cmd == "gateway":
             return gateway.serve(cfg)
         if args.cmd == "api":
-            if not cfg.api_token:
-                print("[FAIL] LOMBO_VISA_API_TOKEN is not set, so the API stays off. Make one with:", file=sys.stderr)
+            if not cfg.api_token and not cfg.admin_token:
+                print("[FAIL] Neither LOMBO_VISA_API_TOKEN nor LOMBO_VISA_ADMIN_TOKEN is set, so the API stays off.",
+                      "Make one with:", file=sys.stderr)  # fmt: skip
                 print("openssl rand -hex 32", file=sys.stderr)
                 return 2
             return api.serve(cfg)

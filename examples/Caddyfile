@@ -6,7 +6,8 @@ jellyfin.example.com {
 	# Any path that mentions "authenticate", in any letter case, goes to the gateway. This is deliberately wider than
 	# the three real sign-in paths: the gateway answers 404 to everything that is not exactly a sign-in, so a path
 	# you did not think of cannot slip past the gateway to Jellyfin by being spelled oddly.
-	@signin path_regexp (?i)authenticate
+	# /visa/ask is the gateway's optional "ask to be let in" page (LOMBO_VISA_ASK_PAGE=true).
+	@signin path_regexp (?i)authenticate|^/visa/ask$
 	handle @signin {
 		reverse_proxy lombo-visa-gateway:8099
 	}

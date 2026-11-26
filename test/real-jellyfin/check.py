@@ -170,6 +170,47 @@ def run() -> None:
     r = login("viewer", AWAY_IP, "away-7")
     check("after revoke: abroad refused again", r[0] == 403, r)
 
+    with open(os.path.join(S, "env")) as f:
+        env = dict(line.strip().split("=", 1) for line in f)
+
+    def api(method: str, path: str, token: str, body: Any = None) -> tuple[int, Any]:
+        c = http.client.HTTPConnection("172.31.250.40", 8097, timeout=30)
+        headers = {"Authorization": f"Bearer {env[token]}", "Content-Type": "application/json"}
+        c.request(method, path, None if body is None else json.dumps(body).encode(), headers)
+        r = c.getresponse()
+        out = r.status, json.loads(r.read())
+        c.close()
+        return out
+
+    admin_key, self_key = "LOMBO_VISA_ADMIN_TOKEN", "LOMBO_VISA_API_TOKEN"
+    uid = viewer_id.replace("-", "")
+    code, made = api("POST", "/v1/admin/windows", admin_key, {"user_id": uid, "days": 2})
+    check("admin API: add a window", code == 200, made)
+    r = login("viewer", AWAY_IP, "admin-trip")
+    check("admin API: that window lets the sign-in through", r[0] == 200, r)
+    listed = api("GET", "/v1/admin/windows", admin_key)[1]["windows"]
+    check("admin API: it is listed", [w["id"] for w in listed] == [made.get("id")], listed)
+    check("admin API: revoke", api("DELETE", f"/v1/admin/windows/{made.get('id')}", admin_key)[0] == 200)
+    check("admin API: refused again after revoke", login("viewer", AWAY_IP, "away-8")[0] == 403)
+
+    wrong = api("POST", "/v1/travel", self_key, {"user_id": uid, "days": 2, "password": "not-it"})
+    check("password check: a wrong password opens nothing", wrong[0] == 422, wrong)
+    right = api("POST", "/v1/travel", self_key, {"user_id": uid, "days": 2, "password": PASSWORD})
+    check("password check: the right password opens a window", right[0] == 200 and right[1].get("active"), right)
+    left = [s.get("DeviceId") for s in call(JF, "GET", "/Sessions", token=admin)[1]]
+    check("password check: leaves no session behind", "lombo-visa-check" not in left, left)
+    keys = call(JF, "GET", "/Devices", token=admin)[1].get("Items", [])
+    check("password check: leaves no device behind", "lombo-visa-check" not in [d.get("Id") for d in keys], keys)
+
+    c = http.client.HTTPConnection(*CADDY, timeout=20)
+    c.request("GET", "/visa/ask", headers={"X-Forwarded-For": AWAY_IP})
+    page = c.getresponse()
+    check("ask page: served through the proxy", page.status == 200 and b'action="/visa/ask"' in page.read())
+    c.request("POST", "/visa/ask", b"name=viewer", {"Content-Type": "application/x-www-form-urlencoded"})
+    sent = c.getresponse()
+    check("ask page: a form post is answered", sent.status == 200 and b"has been told" in sent.read())
+    c.close()
+
     # Swamp the gateway with half-sent sign-ins: running out of its slots must not turn into "fail open".
     head = b"POST /Users/AuthenticateByName HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\n{"
     for amount in (80, 400):

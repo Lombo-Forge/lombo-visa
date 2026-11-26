@@ -32,6 +32,10 @@ SETTINGS = (
     "STATE_FILE",
     "GATEWAY_MODE",
     "GATEWAY_MESSAGE",
+    "ASK_PAGE",
+    "ASK_PAGE_FILE",
+    "ADMIN_TOKEN",
+    "SELF_REQUIRE_PASSWORD",
     "GATEWAY_BIND",
     "GATEWAY_UPSTREAM",
     "TRUSTED_PROXIES",
@@ -77,6 +81,10 @@ class Config:
     self_max_days: int = 14
     self_cooldown_days: int = 30
     gateway_message: str = ""  # empty = the built-in refusal text
+    ask_page: bool = False  # the gateway's "ask to be let in" page
+    ask_page_file: str = ""  # the owner's own HTML for it; empty = the built-in page
+    admin_token: str = ""  # empty = the admin routes of the API are off
+    self_require_password: bool = False
 
     @property
     def gateway_effective_mode(self) -> str:
@@ -129,12 +137,12 @@ def _bind(value: str, name: str = "GATEWAY_BIND") -> tuple[str, int]:
     return host, number
 
 
-def token_problem(token: str) -> str | None:
+def token_problem(token: str, name: str = "API_TOKEN") -> str | None:
     """Why the API cannot use this token, or None when it is fine (empty is fine here: it means the API is off)."""
     if token and len(token) < TOKEN_MIN:
-        return f"{PREFIX}API_TOKEN is too short: use at least {TOKEN_MIN} characters (`openssl rand -hex 32`)"
+        return f"{PREFIX}{name} is too short: use at least {TOKEN_MIN} characters (`openssl rand -hex 32`)"
     if not all(33 <= ord(c) <= 126 for c in token):
-        return f"{PREFIX}API_TOKEN must be printable ASCII with no spaces"
+        return f"{PREFIX}{name} must be printable ASCII with no spaces"
     return None
 
 
@@ -207,9 +215,12 @@ def from_env(env: dict[str, str]) -> Config:
             ) from None
 
     token = get("API_TOKEN")
-    problem = token_problem(token)
+    admin_token = get("ADMIN_TOKEN")
+    problem = token_problem(token) or token_problem(admin_token, "ADMIN_TOKEN")
     if problem:
         raise ConfigError(problem)
+    if admin_token and admin_token == token:
+        raise ConfigError(f"{PREFIX}ADMIN_TOKEN must differ from {PREFIX}API_TOKEN: make a second one")
     max_window = _number(get("MAX_WINDOW_DAYS", "30"), "MAX_WINDOW_DAYS", 1)
     self_max = _number(get("SELF_MAX_DAYS", str(min(14, max_window))), "SELF_MAX_DAYS", 1)
     if self_max > max_window:
@@ -238,6 +249,10 @@ def from_env(env: dict[str, str]) -> Config:
         state_file=get("STATE_FILE", "/data/state.json"),
         gateway_mode=gateway_mode,
         gateway_message=get("GATEWAY_MESSAGE")[:300],
+        ask_page=_truthy(get("ASK_PAGE", "false"), "ASK_PAGE"),
+        ask_page_file=get("ASK_PAGE_FILE"),
+        admin_token=admin_token,
+        self_require_password=_truthy(get("SELF_REQUIRE_PASSWORD", "false"), "SELF_REQUIRE_PASSWORD"),
         gateway_bind=_bind(get("GATEWAY_BIND", "127.0.0.1:8099")),
         gateway_upstream=upstream,
         proxy_networks=tuple(proxies),
