@@ -173,9 +173,10 @@ def _doctor_api(cfg: Config) -> None:
         print("[ ok ] self-service API: off (set LOMBO_VISA_API_TOKEN to let a page open a person's own travel window)")
         return
     host, port = cfg.api_bind
+    after = "was made" if cfg.self_cooldown_from == "start" else "ends"
     print(
         f"[ ok ] self-service API: on at {host}:{port}; a person may open one window of up to {cfg.self_max_days} "
-        f"day(s), then wait {cfg.self_cooldown_days} day(s) after it {'starts' if cfg.self_cooldown_from == 'start' else 'ends'}"
+        f"day(s), then wait {cfg.self_cooldown_days} day(s) after it {after}"
         + (" (cool-down off)" if cfg.self_cooldown_days == 0 else "")
     )
     if cfg.dry_run:

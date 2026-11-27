@@ -172,6 +172,9 @@ def run() -> None:
     print("       " + visa("travel", "add", "viewer", "1").strip())
     r = login("viewer", AWAY_IP, "trip-dev")
     check("abroad with a travel window: sign-in works", r[0] == 200 and got_token(r), r)
+    with open(os.path.join(S, "data", "state.json")) as f:  # before any `run`: only the gateway can have written it
+        noted = {k.partition(":")[2]: v.get("window") for k, v in json.load(f)["devices"].items()}
+    check("the gateway noted the trip device from Jellyfin's own answer", bool(noted.get("trip-dev")), noted)
     trip = r[1].get("AccessToken") if isinstance(r[1], dict) else ""
     print("       " + visa("run").strip().replace("\n", "\n       "))
     r = login("admin", AWAY_IP, "away-6")

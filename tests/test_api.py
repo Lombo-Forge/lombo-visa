@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from lombo_visa import audit, api, core, state
+from lombo_visa import api, audit, core, state
 from lombo_visa.cli import main
 from lombo_visa.config import PREFIX, ConfigError, from_env
 
