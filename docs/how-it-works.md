@@ -52,6 +52,9 @@ or was revoked, and the person has no other open window, those devices are signe
 print "would sign out"). Devices that signed in from home are never touched.
 The gateway also notes the device each time a window lets a sign-in through (not in dry run), so this works even when
 Jellyfin records your proxy's address instead of the visitor's.
+With `SIGN_OUT_ENDED_TRIPS=true` that happens even with blocking off, and no other session is ever ended: use it when
+the gateway does the blocking. Session mode's first run only knows the sessions Jellyfin lists at that moment, so with
+blocking on an idle device that is later used abroad counts as a new sign-in.
 
 ### Self-service windows (optional)
 
