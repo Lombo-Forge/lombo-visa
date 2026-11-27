@@ -128,3 +128,15 @@ def read(audit_file: str, last: int, user: str | None) -> list[dict[str, object]
                 continue
             rows.append(row)
     return rows[-last:] if last > 0 else []
+
+
+def counts(audit_file: str, since: float) -> dict[str, dict[str, int]]:
+    """{mode: {decision: how many}} for entries at or after `since`. Per mode, because the gateway and session
+    mode can both record one sign-in."""
+    out: dict[str, dict[str, int]] = {}
+    for row in read(audit_file, sys.maxsize, None):
+        if float(str(row["ts"])) >= since:
+            mode = out.setdefault(str(row.get("mode", "")), {})
+            decision = str(row.get("decision", ""))
+            mode[decision] = mode.get(decision, 0) + 1
+    return out

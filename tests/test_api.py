@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from lombo_visa import api, core, state
+from lombo_visa import api, audit, core, state
 from lombo_visa.cli import main
 from lombo_visa.config import PREFIX, ConfigError, from_env
 
@@ -320,6 +320,35 @@ def test_cooldown_counts_from_the_end_of_the_window(start, env):
     assert a.call("GET", f"/v1/travel/{UID}")[1]["next_allowed"] is None
     assert a.post()[0] == 200
     assert len(windows(env)) == 2
+
+
+def test_cooldown_can_count_from_when_the_window_was_made(start):
+    clock = Clock()
+    a = start({**LIVE, "LOMBO_VISA_SELF_COOLDOWN_DAYS": "10", "LOMBO_VISA_SELF_COOLDOWN_FROM": "start"}, clock=clock)
+    assert a.post(days=3)[0] == 200
+    clock.now = T0 + 5 * DAY
+    assert a.call("GET", f"/v1/travel/{UID}")[1]["next_allowed"] == int(T0 + 10 * DAY)
+    assert a.post()[0] == 422
+    clock.now = T0 + 10 * DAY + 1
+    assert a.post()[0] == 200
+
+
+def test_the_admin_list_counts_the_last_seven_days_by_mode(start, tmp_path):
+    clock = Clock()
+    admin = "d" * 32
+    log = str(tmp_path / "audit.jsonl")
+    for mode, decision, age in [
+        ("gateway", "deny", 1),
+        ("gateway", "deny", 2),
+        ("session", "deny", 1),
+        ("gateway", "deny", 8),
+    ]:
+        audit.record(log, mode, decision, "JP", "alex", None, T0 - age * DAY)
+    a = start({"LOMBO_VISA_ADMIN_TOKEN": admin, "LOMBO_VISA_AUDIT_FILE": log}, clock=clock)
+    body = a.call("GET", "/v1/admin/windows", token=admin)[1]
+    assert body["last7"] == {"gateway": {"deny": 2}, "session": {"deny": 1}}
+    bare = start({"LOMBO_VISA_ADMIN_TOKEN": admin}, clock=clock)
+    assert bare.call("GET", "/v1/admin/windows", token=admin)[1]["last7"] is None
 
 
 def test_cooldown_zero_allows_a_new_window_right_after_the_last_one(start):
