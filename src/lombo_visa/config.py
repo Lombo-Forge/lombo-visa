@@ -21,6 +21,7 @@ SETTINGS = (
     "WEBHOOK_URL",
     "DRY_RUN",
     "BLOCK_SESSIONS",
+    "SIGN_OUT_ENDED_TRIPS",
     "HOME_COUNTRIES",
     "LAN_SUBNETS",
     "EXEMPT_USERS",
@@ -82,6 +83,7 @@ class Config:
     self_max_days: int = 14
     self_cooldown_days: int = 30
     self_cooldown_from: str = "end"  # "end" or "start" of the last self-opened window
+    sign_out_ended_trips: bool = False  # end a finished trip's devices even with block_sessions off
     gateway_message: str = ""  # empty = the built-in refusal text
     ask_page: bool = False  # the gateway's "ask to be let in" page
     ask_page_file: str = ""  # the owner's own HTML for it; empty = the built-in page
@@ -243,6 +245,7 @@ def from_env(env: dict[str, str]) -> Config:
         webhook_url=webhook,
         dry_run=_truthy(get("DRY_RUN", "true"), "DRY_RUN"),
         block_sessions=_truthy(get("BLOCK_SESSIONS", "false"), "BLOCK_SESSIONS"),
+        sign_out_ended_trips=_truthy(get("SIGN_OUT_ENDED_TRIPS", "false"), "SIGN_OUT_ENDED_TRIPS"),
         home_countries=frozenset(home),
         lan_subnets=tuple(lan),
         exempt_users=frozenset(u.lower() for u in _items(get("EXEMPT_USERS"))),

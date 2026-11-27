@@ -374,7 +374,7 @@ def _expire_windows(
     due = core.due_signouts(st["devices"], state.windows(st), now)
     if not due:
         return []
-    if not (live and cfg.block_sessions):
+    if not (live and (cfg.block_sessions or cfg.sign_out_ended_trips)):
         for key in due:
             print(f"travel window over: would sign out device {key.partition(':')[2][:40]!r}")
         return []

@@ -496,6 +496,18 @@ def test_travel_window_allows_then_signs_out_when_it_ends(env, fake, capsys):
     assert fake.deleted() == ["trip"]
 
 
+def test_ended_trips_can_be_signed_out_without_ending_anything_else(env, fake):
+    only_trips = {**env, "LOMBO_VISA_DRY_RUN": "false", "LOMBO_VISA_SIGN_OUT_ENDED_TRIPS": "true"}
+    baseline(env, fake)
+    assert main(["travel", "add", "pat", "14", "--country", "de"], env) == 0
+    fake.sessions = [session(device="trip", ip=ABROAD_IP, uid="AAAA-BBBB"), session(device="fr", ip="2a00:1450::5")]
+    assert main(["run"], only_trips) == 0
+    assert fake.deleted() == []  # the sign-in with no window is left alone
+    assert main(["travel", "revoke", "1"], env) == 0
+    assert main(["run"], only_trips) == 0
+    assert fake.deleted() == ["trip"]
+
+
 def test_failed_window_sign_out_is_retried(env, fake, capsys):
     baseline(env, fake)
     assert main(["travel", "add", "pat", "1"], env) == 0
