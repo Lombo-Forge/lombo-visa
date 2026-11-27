@@ -50,6 +50,8 @@ that starts now and lasts at most `MAX_WINDOW_DAYS`. A window with a country all
 It follows the account id, not the name. A new sign-in judged `allow-window` is remembered with the window's id. When the window has ended
 or was revoked, and the person has no other open window, those devices are signed out (only with blocking on; otherwise `run` and `plan`
 print "would sign out"). Devices that signed in from home are never touched.
+The gateway also notes the device each time a window lets a sign-in through (not in dry run), so this works even when
+Jellyfin records your proxy's address instead of the visitor's.
 
 ### Self-service windows (optional)
 

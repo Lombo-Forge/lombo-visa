@@ -31,7 +31,6 @@ from .jellyfin import Jellyfin, JellyfinError
 
 MAX_ALERT_CHARS = 1800
 MAX_ALERT_LINES = 10
-MAX_DEVICES = 5000
 
 
 def _jf(cfg: Config) -> Jellyfin:
@@ -286,10 +285,10 @@ def _round(cfg: Config, now: float) -> int:
     live = not cfg.dry_run
     if not st["baselined"]:
         for s in sessions:
-            st["devices"][core.device_key(s.user_id, s.device_id)] = {
-                "user": core.clean_text(s.user_name),
-                "first": now,
-            }
+            # setdefault: the gateway may already have noted this device under a travel window
+            st["devices"].setdefault(
+                core.device_key(s.user_id, s.device_id), {"user": core.clean_text(s.user_name), "first": now}
+            )
         st["baselined"] = True
         state.save(cfg.state_file, st)
         print(f"First run: recorded {len(sessions)} existing session(s) as allowed. Later sign-ins are judged.")
@@ -306,7 +305,7 @@ def _round(cfg: Config, now: float) -> int:
         if i.remember:
             if i.verdict != core.UNKNOWN or i.first_note:
                 _audit(cfg, i, now)
-            if len(st["devices"]) < MAX_DEVICES:
+            if len(st["devices"]) < state.MAX_DEVICES:
                 entry: dict[str, Any] = {
                     "user": core.clean_text(i.session.user_name),
                     "first": now,

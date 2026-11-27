@@ -673,3 +673,36 @@ def test_a_compressing_jellyfin_cannot_hide_who_used_quick_connect(start, up):
     assert status == 403
     assert b"qc-token" not in data
     assert [r["path"] for r in up.requests][-1] == "/Sessions/Logout"
+
+
+def signed_in(req):
+    body = {"AccessToken": "t", "User": {"Name": "Pat", "Id": "aaaabbbb"}, "SessionInfo": {"DeviceId": "phone"}}
+    return 200, [("Content-Type", "application/json")], json.dumps(body).encode()
+
+
+@pytest.mark.parametrize("path", [SIGN_IN, "/Users/AuthenticateWithQuickConnect"])
+def test_a_window_sign_in_is_noted_so_it_is_signed_out_later(start, up, env, path):
+    give_window(env)
+    up.script = signed_in
+    assert start().send(path=path)[0] == 200
+    st = state.load(env["LOMBO_VISA_STATE_FILE"])
+    assert st["devices"]["aaaabbbb:phone"]["window"] == 1
+    assert core.due_signouts(st["devices"], state.windows(st), time.time()) == []
+    assert core.due_signouts(st["devices"], state.windows(st), time.time() + 8 * 86400) == ["aaaabbbb:phone"]
+
+
+def test_nothing_is_noted_at_home_or_in_dry_run(start, up, env):
+    give_window(env)
+    up.script = signed_in
+    assert start(LOMBO_VISA_DRY_RUN="true").send()[0] == 200
+    assert start().send(ip="")[0] == 200
+    assert state.load(env["LOMBO_VISA_STATE_FILE"])["devices"] == {}
+
+
+def test_an_answer_that_cannot_be_read_still_signs_the_person_in(start, up, env):
+    give_window(env)
+    gw = start()
+    status, _, data = gw.send()
+    assert status == 200
+    assert data == up.body
+    assert any("could not note the device" in line for line in gw.logs)
