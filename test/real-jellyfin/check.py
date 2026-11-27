@@ -19,12 +19,21 @@ failures: list[str] = []
 
 
 def call(
-    where: tuple[str, int], method: str, path: str, body: Any = None, token: str = "", ip: str = "", device: str = "lf"
+    where: tuple[str, int],
+    method: str,
+    path: str,
+    body: Any = None,
+    token: str = "",
+    ip: str = "",
+    device: str = "lf",
+    encoding: str = "",
 ) -> tuple[int, Any]:
     auth = f'MediaBrowser Client="lf", Device="{device}", DeviceId="{device}", Version="1"'
     headers = {"Content-Type": "application/json", "Authorization": auth + (f', Token="{token}"' if token else "")}
     if ip:
         headers["X-Forwarded-For"] = ip
+    if encoding:
+        headers["Accept-Encoding"] = encoding
     c = http.client.HTTPConnection(*where, timeout=60)
     try:
         data = body if isinstance(body, bytes) else None if body is None else json.dumps(body).encode()
@@ -133,19 +142,23 @@ def run() -> None:
     r = login("viewer", f"{HOME_IP}, {AWAY_IP}", "away-5")
     check("a visitor adding a home address in front does not get in", not got_token(r) or r[0] != 200, r)
 
-    def quick(ip: str, device: str, who: str) -> tuple[int, Any]:
+    def quick(ip: str, device: str, who: str, encoding: str = "") -> tuple[int, Any]:
         start = call(CADDY, "POST", "/QuickConnect/Initiate", ip=ip, device=device)
         if start[0] != 200:
             return start
         call(JF, "POST", f"/QuickConnect/Authorize?code={start[1]['Code']}", token=who)
         secret = {"Secret": start[1]["Secret"]}
-        return call(CADDY, "POST", "/Users/AuthenticateWithQuickConnect", secret, ip=ip, device=device)
+        return call(
+            CADDY, "POST", "/Users/AuthenticateWithQuickConnect", secret, ip=ip, device=device, encoding=encoding
+        )
 
     mine = call(JF, "POST", "/Users/AuthenticateByName", {"Username": "viewer", "Pw": PASSWORD}, device="authorizer")[1]
     r = quick(HOME_IP, "qc-home", mine["AccessToken"])
     check("home country: Quick Connect works", r[0] == 200 and got_token(r), r)
     r = quick(AWAY_IP, "qc-away", mine["AccessToken"])
     check("abroad: Quick Connect refused", r[0] == 403 and not got_token(r), r)
+    r = quick(AWAY_IP, "qc-away-gzip", mine["AccessToken"], encoding="gzip, br")
+    check("abroad: Quick Connect refused when the app accepts compression", r[0] == 403, r)
     devices = [s.get("DeviceId") for s in call(JF, "GET", "/Sessions", token=admin)[1]]
     keys = call(JF, "GET", "/Devices", token=admin)[1].get("Items", [])
     check("abroad: refused Quick Connect left no session", "qc-away" not in devices, devices)

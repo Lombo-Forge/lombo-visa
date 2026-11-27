@@ -1,5 +1,6 @@
 """The gateway, against a fake Jellyfin on a real socket (127.0.0.1, port 0). No real Jellyfin has been involved."""
 
+import gzip
 import http.client
 import ipaddress
 import json
@@ -652,3 +653,23 @@ def test_doctor_checks_the_gateway(env, capsys, tmp_path):
     _, out = doctor(env, capsys, LOMBO_VISA_AUDIT_FILE=str(tmp_path / "a" / "audit.jsonl"))
     assert "audit log:" in out
     assert "[FAIL]" not in out
+
+
+def test_a_compressing_jellyfin_cannot_hide_who_used_quick_connect(start, up):
+    """Jellyfin compresses when asked. The gateway must not ask, or it cannot read who just signed in."""
+
+    def jellyfin(req):
+        if req["path"] != "/Users/AuthenticateWithQuickConnect":
+            return 204, [], b""
+        body = json.dumps({"AccessToken": "qc-token", "User": {"Name": "Pat", "Id": "aaaabbbb"}}).encode()
+        if any(k.lower() == "accept-encoding" for k, _ in req["headers"]):
+            return 200, [("Content-Encoding", "gzip")], gzip.compress(body)
+        return 200, [("Content-Type", "application/json")], body
+
+    up.script = jellyfin
+    status, _, data = start().send(
+        path="/Users/AuthenticateWithQuickConnect", body=b'{"Secret":"s"}', headers={"Accept-Encoding": "gzip, br"}
+    )
+    assert status == 403
+    assert b"qc-token" not in data
+    assert [r["path"] for r in up.requests][-1] == "/Sessions/Logout"
