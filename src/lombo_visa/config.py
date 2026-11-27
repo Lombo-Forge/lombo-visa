@@ -44,6 +44,7 @@ SETTINGS = (
     "API_BIND",
     "SELF_MAX_DAYS",
     "SELF_COOLDOWN_DAYS",
+    "SELF_COOLDOWN_FROM",
 )
 
 TOKEN_MIN = 24
@@ -80,6 +81,7 @@ class Config:
     api_bind: tuple[str, int] = ("127.0.0.1", 8097)
     self_max_days: int = 14
     self_cooldown_days: int = 30
+    self_cooldown_from: str = "end"  # "end" or "start" of the last self-opened window
     gateway_message: str = ""  # empty = the built-in refusal text
     ask_page: bool = False  # the gateway's "ask to be let in" page
     ask_page_file: str = ""  # the owner's own HTML for it; empty = the built-in page
@@ -230,6 +232,9 @@ def from_env(env: dict[str, str]) -> Config:
     cooldown = _number(get("SELF_COOLDOWN_DAYS", "30"), "SELF_COOLDOWN_DAYS", 0)
     if cooldown > 365:
         raise ConfigError(f"{PREFIX}SELF_COOLDOWN_DAYS must be between 0 and 365")
+    cooldown_from = get("SELF_COOLDOWN_FROM", "end").strip().lower()
+    if cooldown_from not in ("end", "start"):
+        raise ConfigError(f"{PREFIX}SELF_COOLDOWN_FROM must be end or start")
 
     # Safe by default: nothing is sent or ended until DRY_RUN=false, and nothing is ended until BLOCK_SESSIONS=true.
     return Config(
@@ -261,4 +266,5 @@ def from_env(env: dict[str, str]) -> Config:
         api_bind=_bind(get("API_BIND", "127.0.0.1:8097"), "API_BIND"),
         self_max_days=self_max,
         self_cooldown_days=cooldown,
+        self_cooldown_from=cooldown_from,
     )

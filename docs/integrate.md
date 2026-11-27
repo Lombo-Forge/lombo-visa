@@ -44,9 +44,12 @@ Send `Authorization: Bearer $LOMBO_VISA_ADMIN_TOKEN`. It cannot allow Jellyfin a
 
 | Request | Body | Answer |
 |---|---|---|
-| `GET /v1/admin/windows` | none | `{"ok": true, "max_days": 30, "windows": [{"id": 1, "user_id": "...", "name": "alex", "country": "JP", "starts": 1800000000, "ends": 1800432000, "self": false}]}` |
+| `GET /v1/admin/windows` | none | `{"ok": true, "max_days": 30, "windows": [{"id": 1, "user_id": "...", "name": "alex", "country": "JP", "starts": 1800000000, "ends": 1800432000, "self": false}], "last7": {"gateway": {"allow-home": 12, "deny": 2}}}` |
 | `POST /v1/admin/windows` | `{"user_id": "<32 hex>", "days": 5, "country": "JP"}` (`country` optional) | `{"ok": true, "message": "...", "id": 1}` |
 | `DELETE /v1/admin/windows/1` | none | `{"ok": true, "message": "window revoked"}` |
+
+`last7` counts the last seven days' decisions from the audit log, by mode (`gateway`, `session`, `api`); it is `null`
+without `LOMBO_VISA_AUDIT_FILE`. The `api` container needs to see that file.
 
 A refusal is `{"ok": false, "message": "..."}` with 4xx: show the message. `502` means Jellyfin or the state file
 could not be read and nothing changed. Times are Unix seconds. Admin calls write even while `DRY_RUN=true`, as the

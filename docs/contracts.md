@@ -25,6 +25,7 @@ own server side, with the person's id taken from the person it has verified.
 | `LOMBO_VISA_API_BIND` | `127.0.0.1:8097` | An IP address and a port (`[::1]:8097` for IPv6). |
 | `LOMBO_VISA_SELF_MAX_DAYS` | `14` (or `MAX_WINDOW_DAYS` when that is smaller) | Longest window a person may open, 1 to `LOMBO_VISA_MAX_WINDOW_DAYS`. |
 | `LOMBO_VISA_SELF_COOLDOWN_DAYS` | `30` | Days after a self-opened window **ends** before the same person may open another. 0 to 365; 0 = no cool-down. |
+| `LOMBO_VISA_SELF_COOLDOWN_FROM` | `end` | `end`: the wait starts when that window ends. `start`: when it was made. |
 | `LOMBO_VISA_DRY_RUN` | `true` | While true, `POST` checks every rule and answers, but writes nothing. |
 
 ## Every request
@@ -49,7 +50,7 @@ own server side, with the person's id taken from the person it has verified.
 | Field | Meaning |
 |---|---|
 | `active` | A window that is open now or starts later, of any kind (self-opened or an admin's). The one that ends last if there are several. `null` when there is none. Revoked windows never count. `ends` is Unix time in seconds. |
-| `next_allowed` | `null` when the person may open a window now (as far as the cool-down goes). Otherwise the Unix time when the cool-down ends: the end of their last self-opened window (or its revoke time, if earlier) plus `SELF_COOLDOWN_DAYS`. While a self-opened window is still open it is already the time after its end. |
+| `next_allowed` | `null` when the person may open a window now (as far as the cool-down goes). Otherwise the Unix time when the cool-down ends: the end of their last self-opened window (or its revoke time, if earlier; its start with `SELF_COOLDOWN_FROM=start`) plus `SELF_COOLDOWN_DAYS`. While that window is still open the time is already given. |
 | `max_days` | `LOMBO_VISA_SELF_MAX_DAYS`. |
 
 This call reads only Visa's own state file; it does **not** ask Jellyfin. A user id Visa has never seen answers `200` with both

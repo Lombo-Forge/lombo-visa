@@ -166,7 +166,8 @@ class Travel:
         open_now = [w for w in mine if w.revoked_at is None and w.ends_at > now]
         best = max(open_now, key=lambda w: w.ends_at, default=None)
         own = state.self_ids(st)
-        last = max((_end(w) for w in mine if w.id in own), default=None)
+        from_start = self.cfg.self_cooldown_from == "start"
+        last = max((w.starts_at if from_start else _end(w) for w in mine if w.id in own), default=None)
         cool = self.cfg.self_cooldown_days
         next_allowed = last + cool * core.DAY if last is not None and cool > 0 else None
         return {
@@ -226,7 +227,8 @@ class Travel:
             for w in sorted(state.windows(st), key=lambda w: w.ends_at)
             if w.revoked_at is None and w.ends_at > now
         ]  # fmt: skip
-        return 200, {"ok": True, "windows": rows, "max_days": self.cfg.max_window_days}, None
+        week = audit.counts(self.cfg.audit_file, now - 7 * core.DAY) if self.cfg.audit_file else None
+        return 200, {"ok": True, "windows": rows, "max_days": self.cfg.max_window_days, "last7": week}, None
 
     def admin_add(self, user_id: str, days: int, country: str | None) -> Reply:
         cfg = self.cfg
