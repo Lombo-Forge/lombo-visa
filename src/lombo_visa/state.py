@@ -27,6 +27,7 @@ from typing import Any
 from .core import Window
 
 NOTED_KEEP_SECONDS = 7 * 86400
+MAX_DEVICES = 5000  # remembered user:device pairs
 
 
 class StateError(Exception):

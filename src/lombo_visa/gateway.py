@@ -331,7 +331,31 @@ class Gateway:
             return self.refusal()
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(kind, shown, country, user, ip, shown)
-        return send()
+        reply = send()
+        if verdict == core.ALLOW_WINDOW:
+            self._remember_device(reply, country)
+        return reply
+
+    def _remember_device(self, reply: Reply, country: str) -> None:
+        """Note the device a travel window just let in, so `run` signs it out when the window ends. `run` alone
+        only sees the address Jellyfin recorded, which behind another proxy looks local. Never fails a sign-in."""
+        if self.cfg.dry_run or reply.status != 200:
+            return
+        try:
+            data = json.loads(reply.body)
+            who, device = data["User"], str(data["SessionInfo"]["DeviceId"])
+            uid, now = str(who["Id"]), self.clock()
+            window = core.decide(country, self.cfg.home_countries, self._windows() or [], uid, now)[1]
+            if window is None or not device:
+                return
+            with state.locked(self.cfg.state_file):
+                st = state.load(self.cfg.state_file, quarantine=False)
+                key = core.device_key(uid, device)
+                if key in st["devices"] or len(st["devices"]) < state.MAX_DEVICES:
+                    st["devices"][key] = {"user": core.clean_text(who.get("Name")), "first": now, "window": window}
+                    state.save(self.cfg.state_file, st)
+        except Exception as e:  # noqa: BLE001 (bookkeeping: the person is already signed in)
+            self.log(f"could not note the device for its travel window ({type(e).__name__})")
 
     def _quickconnect(self, country: str, ip: str | None, enforce: bool, send: Callable[[], Reply]) -> Reply:
         """The request names nobody: the person is known only from Jellyfin's answer. So a sign-in from abroad is
@@ -359,6 +383,8 @@ class Gateway:
             return self.refusal()
         shown = "would-deny" if verdict == core.DENY else verdict
         self._record(QUICKCONNECT, shown, country, name, ip, shown)
+        if verdict == core.ALLOW_WINDOW:
+            self._remember_device(reply, country)
         return reply
 
 
