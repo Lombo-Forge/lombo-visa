@@ -60,7 +60,7 @@ network, the disk or the clock; the time and the country function are passed in.
 5. **Two switches, three stages.** `DRY_RUN` (default true) then `BLOCK_SESSIONS` (default false). The original had off/log/enforce.
 6. **A circuit breaker** (`MAX_BLOCKS_PER_ROUND`) is new: a wrong address source or a bad database would otherwise end many accounts' sessions at once.
    It counts distinct accounts, not sessions, so that someone holding one stolen password cannot trip it by opening many sessions.
-7. **Existing sessions are recorded on the first run** and never judged, matching "sessions that already exist keep working anywhere".
+7. **Existing sessions and signed-in devices are recorded on the first run** and never judged, matching "sessions that already exist keep working anywhere".
 
 ## Kept, cut and generalised
 

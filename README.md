@@ -98,7 +98,7 @@ Setup details, including making Jellyfin see real client addresses behind a prox
 |---|---|
 | `lombo-visa doctor` | Checks settings, Jellyfin, the key, the session list, the country database and the state file. Exit code 1 if something fails. |
 | `lombo-visa plan` | Shows what the next round would do. Never changes anything. |
-| `lombo-visa run [--loop]` | Does it. `--loop` repeats every `LOMBO_VISA_INTERVAL_SECONDS`. The first run only records the sessions that exist. |
+| `lombo-visa run [--loop]` | Does it. `--loop` repeats every `LOMBO_VISA_INTERVAL_SECONDS`. The first run only records the sessions and signed-in devices that exist. |
 | `lombo-visa travel add NAME DAYS [--country CC]` | Let a person sign in from abroad, starting now. |
 | `lombo-visa travel list` / `revoke ID` | Show or end windows. |
 | `lombo-visa geoip update [--force]` | Download the country database. Monthly is enough. |

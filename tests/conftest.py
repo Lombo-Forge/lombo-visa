@@ -33,6 +33,8 @@ class Fake:
         self.requests: list[dict] = []
         self.key = "good-key"
         self.sessions: list[dict] = []
+        self.devices: list[dict] = []
+        self.devices_status = 200
         self.users = [
             {"Id": "aaaa-bbbb", "Name": "Pat", "Policy": {"IsAdministrator": False}},
             {"Id": "cccc-dddd", "Name": "Boss", "Policy": {"IsAdministrator": True}},
@@ -64,6 +66,8 @@ class Fake:
                     return self._reply(200, {"ServerName": "Fake"})
                 if self.path == "/Sessions":
                     return self._reply(outer.sessions_status, outer.sessions)
+                if self.path == "/Devices":
+                    return self._reply(outer.devices_status, {"Items": outer.devices})
                 if self.path == "/Users":
                     return self._reply(200, outer.users)
                 return self._reply(404)

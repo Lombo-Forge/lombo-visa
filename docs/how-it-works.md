@@ -53,8 +53,17 @@ print "would sign out"). Devices that signed in from home are never touched.
 The gateway also notes the device each time a window lets a sign-in through (not in dry run), so this works even when
 Jellyfin records your proxy's address instead of the visitor's.
 With `SIGN_OUT_ENDED_TRIPS=true` that happens even with blocking off, and no other session is ever ended: use it when
-the gateway does the blocking. Session mode's first run only knows the sessions Jellyfin lists at that moment, so with
-blocking on an idle device that is later used abroad counts as a new sign-in.
+the gateway does the blocking.
+
+## The first run
+
+The first `run` records as allowed both the sessions Jellyfin lists (`GET /Sessions`) and every signed-in device
+(`GET /Devices`), so a TV that is switched off is not taken for a new sign-in when it is next used.
+
+Versions before 0.6.1 recorded sessions only. After an upgrade, the first round records, once, the devices whose
+last activity is older than that install's first run. A device used or signed in since then is left to the normal
+rules. A device that was idle at the first run and has been used since was judged when it appeared, and keeps that
+result.
 
 ### Self-service windows (optional)
 
