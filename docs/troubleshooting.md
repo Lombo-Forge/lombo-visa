@@ -29,7 +29,7 @@ the state file is writable. `[FAIL]` needs fixing; `[WARN]` is something to read
 | `[FAIL] ... HOME_COUNTRIES ... use GB` | Home countries must be ISO 3166 codes; the United Kingdom is `GB`. |
 | `[WARN] home countries: none of ... appears in the database` | None of your codes occurs in the country file, so every public address would be judged foreign. Check the codes. |
 | `[FAIL] unexpected ...Error` | An error nobody expected; the round was skipped and the loop goes on. Report it. |
-| `No baseline yet` (from `plan`) | Run `lombo-visa run` once; it records the current sessions as allowed. |
+| `No baseline yet` (from `plan`) | Run `lombo-visa run` once; it records the current sessions and signed-in devices as allowed. |
 | `all are on your own network` | See [Real addresses](setup.md#real-addresses). |
 | `Sign-ins from abroad for more than N different accounts in one round. Nothing was ended` | The safety stop. Usually a wrong address source or a bad database; it can also be a real wave of stolen passwords. Check `plan`, then decide. |
 | `Not ended: its device id also belongs to another account` | Two accounts used one device id. Ending it would sign the other one out, so it is only reported. |

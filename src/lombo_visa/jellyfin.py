@@ -3,7 +3,8 @@
 Authentication uses an API key (Jellyfin: Dashboard > API Keys) in the Authorization header.
 Every failure becomes a JellyfinError with a short message, so callers print it instead of crashing.
 
-Calls used: GET /Sessions (who is signed in, from which address), GET /Users (name to id, admin flag),
+Calls used: GET /Sessions (who is connected, from which address), GET /Devices (every signed-in device, read
+for the first run), GET /Users (name to id, admin flag),
 DELETE /Devices?id= (sign a device out: Jellyfin removes the device and its access tokens). Only with
 SELF_REQUIRE_PASSWORD: POST /Users/AuthenticateByName then POST /Sessions/Logout, to check a password.
 """
@@ -13,9 +14,10 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC, datetime
 from typing import Any, cast
 
-from .core import Session, clean_text
+from .core import Device, Session, clean_text
 
 
 class JellyfinError(Exception):
@@ -32,6 +34,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _epoch(value: object) -> float | None:
+    try:
+        when = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return when.replace(tzinfo=when.tzinfo or UTC).timestamp()
 
 
 class Jellyfin:
@@ -94,6 +104,20 @@ class Jellyfin:
                 )
             )
         return out
+
+    def devices(self) -> list[Device]:
+        """Every device that holds a sign-in, also the ones switched off now (so with no session)."""
+        raw = self._call("GET", "/Devices")
+        items = raw.get("Items") if isinstance(raw, dict) else None
+        if not isinstance(items, list):
+            raise JellyfinError("/Devices: answer has no list of Items")
+        return [
+            Device(
+                str(d["LastUserId"]), str(d.get("LastUserName") or ""), str(d["Id"]), _epoch(d.get("DateLastActivity"))
+            )
+            for d in items
+            if isinstance(d, dict) and d.get("LastUserId") and d.get("Id")
+        ]
 
     def users(self) -> list[dict[str, Any]]:
         raw = self._call("GET", "/Users")

@@ -300,6 +300,16 @@ class Session:
 
 
 @dataclass(frozen=True)
+class Device:
+    """A signed-in device from Jellyfin's device list (it holds a token, whether or not it is connected)."""
+
+    user_id: str
+    user_name: str
+    device_id: str
+    last_active: float | None  # seconds since the epoch; None when Jellyfin gave no readable time
+
+
+@dataclass(frozen=True)
 class Window:
     id: int
     user_id: str
@@ -465,6 +475,19 @@ def plan_round(
     if tripped:
         items = [Item(i.session, i.key, i.country, i.verdict, i.window_id, i.clash, False, i.first_note) for i in items]
     return RoundPlan(items, tripped)
+
+
+def idle_since_first_run(devices: list[Device], known: Mapping[str, Mapping[str, Any]]) -> list[Device]:
+    """For installs whose first run recorded sessions only: the devices not used since that run.
+
+    Only those: anything that signed in or was used since then was in front of Visa and keeps its verdict.
+    The first run's entries are the ones without a "window" field; with none left, nothing is returned.
+    """
+    firsts = [v["first"] for v in known.values() if "window" not in v and isinstance(v.get("first"), int | float)]
+    if not firsts:
+        return []
+    cutoff = min(firsts)
+    return [d for d in devices if d.last_active is not None and d.last_active < cutoff]
 
 
 def due_signouts(devices: Mapping[str, Mapping[str, Any]], windows: list[Window], now: float) -> list[str]:

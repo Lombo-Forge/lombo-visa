@@ -255,8 +255,8 @@ def plan_cmd(cfg: Config, now: float) -> int:
     sessions = _jf(cfg).sessions()
     if not st["baselined"]:
         print(
-            f"No baseline yet: the first `run` records the {len(sessions)} session(s) that exist now as allowed "
-            "(sessions that already exist keep working anywhere) and judges only later sign-ins."
+            f"No baseline yet: the first `run` records the {len(sessions)} session(s) and every signed-in device "
+            "that exist now as allowed (they keep working anywhere) and judges only later sign-ins."
         )
         return 0
     result, have_db = _evaluate(cfg, st, sessions, now)
@@ -285,15 +285,20 @@ def _round(cfg: Config, now: float) -> int:
     sessions = jf.sessions()  # a failure here ends the round with nothing done (fail open)
     live = not cfg.dry_run
     if not st["baselined"]:
+        devices = jf.devices()  # a device that is switched off has no session but is signed in all the same
         for s in sessions:
-            # setdefault: the gateway may already have noted this device under a travel window
-            st["devices"].setdefault(
-                core.device_key(s.user_id, s.device_id), {"user": core.clean_text(s.user_name), "first": now}
-            )
-        st["baselined"] = True
+            _remember(st, s.user_id, s.device_id, s.user_name, now)
+        for d in devices:
+            _remember(st, d.user_id, d.device_id, d.user_name, now)
+        st["baselined"] = st["devices_baselined"] = True
         state.save(cfg.state_file, st)
-        print(f"First run: recorded {len(sessions)} existing session(s) as allowed. Later sign-ins are judged.")
+        print(
+            f"First run: recorded {len(sessions)} existing session(s) and {len(devices)} signed-in device(s) "
+            "as allowed. Later sign-ins are judged."
+        )
         return 0
+    if not st["devices_baselined"]:
+        _catch_up_devices(jf, st, now)
 
     result, have_db = _evaluate(cfg, st, sessions, now)
     if not have_db:
@@ -350,6 +355,32 @@ def _round(cfg: Config, now: float) -> int:
     elif messages:
         print(f"({len(messages)} alert(s) not sent: {'dry run' if cfg.dry_run else 'no webhook set'})")
     return 0
+
+
+def _remember(st: dict[str, Any], user_id: str, device_id: str, name: str, now: float) -> bool:
+    """Record a device that was signed in before Visa judged anything. True when it is new to the state."""
+    key = core.device_key(user_id, device_id)
+    # an existing entry stays: the gateway may already have noted this device under a travel window
+    if key in st["devices"] or len(st["devices"]) >= state.MAX_DEVICES:
+        return False
+    st["devices"][key] = {"user": core.clean_text(name), "first": now}
+    return True
+
+
+def _catch_up_devices(jf: Jellyfin, st: dict[str, Any], now: float) -> None:
+    """Once, after an upgrade: the first run of an older version recorded sessions only."""
+    try:
+        devices = jf.devices()
+    except JellyfinError as e:
+        print(f"[WARN] could not read the device list ({e}); trying again next round", file=sys.stderr)
+        return
+    added = [
+        d
+        for d in core.idle_since_first_run(devices, st["devices"])
+        if _remember(st, d.user_id, d.device_id, d.user_name, now)
+    ]
+    st["devices_baselined"] = True
+    print(f"Recorded {len(added)} signed-in device(s) not used since the first run as allowed (once).")
 
 
 def _audit(cfg: Config, i: core.Item, now: float) -> None:

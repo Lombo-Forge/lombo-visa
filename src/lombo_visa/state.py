@@ -5,7 +5,8 @@
 - `noted`: new sessions already reported (log line and alert), so a round does not repeat itself.
 - `windows`: travel windows made with `lombo-visa travel add`, or by a person through the API (those carry
   `"self": true`, which the cool-down reads).
-- `baselined`: the first run records the sessions that already exist as allowed.
+- `baselined`: the first run records the sessions and signed-in devices that already exist as allowed.
+- `devices_baselined`: the device list has been recorded too (older versions recorded sessions only).
 
 A missing file means "start fresh". A damaged one is moved aside (`state.json.bad-<time>`, with a loud warning) and
 then also starts fresh, so nothing is lost silently; a file that cannot be read at all stops the round instead.
@@ -35,7 +36,7 @@ class StateError(Exception):
 
 
 def empty() -> dict[str, Any]:
-    return {"baselined": False, "devices": {}, "noted": {}, "windows": {}}
+    return {"baselined": False, "devices_baselined": False, "devices": {}, "noted": {}, "windows": {}}
 
 
 def _set_aside(path: str) -> str:
@@ -67,7 +68,7 @@ def load(path: str, quarantine: bool = True) -> dict[str, Any]:
         bad = _set_aside(path)
         print(
             f"[WARN] {path} is damaged ({e}). Moved it to {bad} and starting fresh: travel windows in it are gone "
-            "and the sessions open now are recorded as allowed.",
+            "and the sessions and devices signed in now are recorded as allowed.",
             file=sys.stderr,
         )
         return empty()
@@ -76,6 +77,7 @@ def load(path: str, quarantine: bool = True) -> dict[str, Any]:
         if isinstance(data.get(name), dict):
             out[name] = data[name]
     out["baselined"] = data.get("baselined") is True
+    out["devices_baselined"] = data.get("devices_baselined") is True
     return out
 
 

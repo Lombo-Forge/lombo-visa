@@ -206,7 +206,7 @@ fail-open path. Keep a rate limit on the sign-in paths, or delete `handle_errors
 ## Powers and secrets the app holds
 
 - The Jellyfin API key (`LOMBO_VISA_JELLYFIN_API_KEY`). Jellyfin keys are not scoped: this key can do anything an administrator can. The app only
-  calls `GET /System/Info/Public`, `GET /System/Info`, `GET /Sessions`, `GET /Users` and `DELETE /Devices`. A compromise of the app (or of its `.env`) is a compromise of
+  calls `GET /System/Info/Public`, `GET /System/Info`, `GET /Sessions`, `GET /Devices`, `GET /Users` and `DELETE /Devices`. A compromise of the app (or of its `.env`) is a compromise of
   Jellyfin administration. Keep the file readable only by you; use a key only for this app so it can be revoked.
 - The webhook URL (a secret in itself for most chat services).
 - Session mode never sees passwords or tokens. The gateway sees them in passing (it forwards them to the configured upstream only) and never logs or stores them: [security.md](security.md).
