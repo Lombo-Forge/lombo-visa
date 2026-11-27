@@ -260,7 +260,10 @@ class Gateway:
     def forward(self, method: str, target: str, headers: list[tuple[str, str]], body: bytes) -> Reply:
         """Send the request to the configured upstream and return its answer untouched. Never follows a redirect."""
         listed = {t.strip().lower() for k, v in headers if k.lower() == "connection" for t in v.split(",") if t.strip()}
-        out = [(k, v) for k, v in headers if k.lower() not in _HOP and k.lower() not in listed]
+        # Not Accept-Encoding: the answer is read to see who signed in (Quick Connect), and a compressed one
+        # cannot be read, which counted as a doubt and let a foreign sign-in through.
+        drop = _HOP | listed | {"accept-encoding"}
+        out = [(k, v) for k, v in headers if k.lower() not in drop]
         cls = http.client.HTTPSConnection if self._tls else http.client.HTTPConnection
         conn = cls(self._host, self._port, timeout=UPSTREAM_TIMEOUT)
         try:
